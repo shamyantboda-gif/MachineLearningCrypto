@@ -296,9 +296,19 @@ def main() -> None:
     run_dir = Path(args.run) if args.run else latest_run()
     results, predictions = load_run(run_dir)
 
+    # The runner writes dm.csv next to the results. Reading it back rather than
+    # recomputing keeps the reported test identical to the one the run produced.
+    dm_path = run_dir / "dm.csv"
+    dm = pd.read_csv(dm_path) if dm_path.exists() else pd.DataFrame()
+    dm_heading = f"Diebold-Mariano vs {dm['vs_baseline'].iloc[0]}" if not dm.empty else "Diebold-Mariano"
+    if not dm.empty:
+        # Indexed by model to match the other tables in the report.
+        dm = dm.drop(columns=["vs_baseline"]).set_index("model")
+
     sections = {
         "Per-fold summary": fold_table(results),
         f"Edge over {args.baseline}, per fold": edge_over_baseline(results, baseline=args.baseline),
+        dm_heading: dm,
         "Seed spread": seed_spread(results),
     }
     path = write_markdown(run_dir, sections, "Results")

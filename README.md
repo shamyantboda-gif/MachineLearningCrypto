@@ -6,11 +6,11 @@ The short answer is no, and the interesting part is the shape of the failure.
 
 ## What it found
 
-**Nothing beat the baseline on direction.** Across 27 quarterly walk-forward folds, the best model (LightGBM) predicted next-day direction correctly 51.35% of the time against a base rate of 51.12%. That is an edge of 0.23 percentage points against a fold-to-fold standard deviation of 3.6 points. A Diebold-Mariano test on Brier scores gives a p-value of 0.97 against the abstaining baseline. ARIMA, all three neural architectures, and all three of the non-abstaining baselines scored below it.
+**Nothing beat the baseline on direction.** Across 27 quarterly walk-forward folds, the best model (LightGBM) predicted next-day direction correctly 51.35% of the time against a base rate of 51.12%. That is an edge of 0.23 percentage points against a fold-to-fold standard deviation of 3.6 points. A Diebold-Mariano test on Brier scores gives a p-value of 0.97 against the abstaining baseline, and it is one of only two models the test cannot separate from abstaining, the LSTM being the other at p = 0.20. Everything else, including the ridge regression that posted the best ROC-AUC of anything here, is significantly worse than a constant 0.5.
 
 **The seed matters more than the architecture.** Averaged over 27 folds, the LSTM's edge over the abstaining baseline is -0.53 percentage points. Its standard deviation across five random seeds, within a fold, is 2.61 points. The noise from reseeding is five times the size of the effect being measured, which means a single-seed run of any of these models could report almost anything.
 
-**The edge that did exist died at 5 basis points.** Traded as a long-short strategy, LightGBM's signal returned 8.6% annually at zero cost, 0.2% at 5 bps round trip, and -21.4% at 20 bps. It turned the portfolio over 323 times a year. Buy-and-hold on the same four assets over the same window returned 56.2% at a Sharpe of 0.98. The model never came close.
+**The edge that did exist died at 5 basis points.** Traded as a long-short strategy, LightGBM's signal returned 8.6% annually at zero cost, 0.2% at 5 bps round trip, and -21.4% at 20 bps. It turned the portfolio over 323 times a year. Buy-and-hold on the same four assets over the same window returned 56.2% at a Sharpe of 0.98. The model never came close. The ridge signal did worse still, losing 1.85% a year before any costs at all, which is the more honest ending: the model that ranked best was not merely expensive to trade, it was unprofitable to trade.
 
 **GARCH lost to a 63-day moving average.** This one surprised me. Volatility is supposed to be the tractable target, and GARCH(1,1) is supposed to be the tool. On QLIKE loss, a trailing mean of log realised variance scored 1.009 and GARCH scored 7.93. The reason is not that GARCH lacks information: per asset, its forecasts correlate 0.46 to 0.53 with next-day realised variance, about the same as persistence. The problem is that its calibration drifts. Its per-fold bias has a standard deviation of 1.34 in log variance, against 0.02 for persistence, so the level is wrong in a different direction on every fold and the ranking never gets a chance to pay off.
 
@@ -20,17 +20,21 @@ The short answer is no, and the interesting part is the shape of the failure.
 
 ### Next-day direction, 27 folds, 9,299 predictions per model
 
-| model | accuracy | base rate | ROC-AUC | MCC | folds beating base rate |
-|---|---|---|---|---|---|
-| lightgbm | 0.5135 (SD 0.0357) | 0.5112 | 0.5298 | 0.0414 | 16 of 27 |
-| ridge / L2 logistic | 0.5115 (SD 0.0418) | 0.5112 | 0.5315 | 0.0397 | 14 of 27 |
-| zero (abstain at 0.5) | 0.5112 | 0.5112 | 0.5000 | 0.0000 | n/a |
-| historical mean | 0.5044 | 0.5112 | 0.4548 | -0.0425 | 7 of 27 |
-| majority class | 0.4875 | 0.5112 | 0.5000 | 0.0000 | 0 of 27 |
-| arima | 0.4833 | 0.5112 | 0.4936 | -0.0080 | 4 of 27 |
-| persistence | 0.4771 | 0.5112 | 0.4630 | -0.0539 | 7 of 27 |
+| model | accuracy | base rate | ROC-AUC | MCC | folds beating base rate | DM p vs abstain |
+|---|---|---|---|---|---|---|
+| lightgbm | 0.5135 (SD 0.0357) | 0.5112 | 0.5298 | 0.0414 | 16 of 27 | 0.97 |
+| ridge / L2 logistic | 0.5115 (SD 0.0418) | 0.5112 | 0.5315 | 0.0397 | 14 of 27 | 0.001 |
+| zero (abstain at 0.5) | 0.5112 | 0.5112 | 0.5000 | 0.0000 | n/a | n/a |
+| historical mean | 0.5044 | 0.5112 | 0.4548 | -0.0425 | 7 of 27 | <0.001 |
+| majority class | 0.4875 | 0.5112 | 0.5000 | 0.0000 | 0 of 27 | <0.001 |
+| arima | 0.4833 | 0.5112 | 0.4936 | -0.0080 | 4 of 27 | <0.001 |
+| persistence | 0.4771 | 0.5112 | 0.4630 | -0.0539 | 7 of 27 | <0.001 |
+
+The last column is a Diebold-Mariano test on Brier scores against the abstaining forecast, with the Harvey-Leybourne-Newbold small-sample correction. Every model in this table except LightGBM is significantly *worse* than a constant 0.5. LightGBM is the only one here the test cannot separate from abstaining, and it does not beat it either. The sequence models are tested the same way in their own table below.
 
 An L2 logistic regression, with its penalty chosen on the inner validation slice, scored the highest ROC-AUC of anything in the study: 0.5315 against LightGBM's 0.5298. Whatever weak structure is present in these 80 features is linear, and the boosted trees are not finding anything on top of it.
+
+That AUC does not survive contact with the Brier score, and the gap between the two is the most useful thing in this table. ROC-AUC only asks whether the model ranks up-days above down-days. Brier asks whether the number it prints is a probability. Ridge ranks better than anything else here and still loses to abstaining at p = 0.001, because it is confident at the wrong times: its per-fold Brier ranges from 0.240 to 0.285 while the abstaining forecast sits at exactly 0.250 by construction. A model that ranks well and is calibrated badly is worth less than one that says nothing, and reporting only the AUC would have hidden that completely.
 
 Persistence scoring 47.7% is not noise. Daily crypto returns mean-revert slightly at a one-day horizon, so betting that tomorrow repeats today loses more often than a coin flip.
 
@@ -61,16 +65,23 @@ The Mincer-Zarnowitz columns show the split cleanly. Persistence has the highest
 
 Two corrections were tried for GARCH, both fitted on training folds only: a constant level shift and a full intercept-plus-slope regression. They produced results within 1% of each other, so the gap is not a calibration artifact that a better correction would remove.
 
-### Backtest, LightGBM signal, long-short with a 2% dead zone
+### Backtest, long-short with a 2% dead zone
 
-| cost (bps round trip) | annual return | Sharpe | max drawdown | annual turnover |
-|---|---|---|---|---|
-| 0 | 8.59% | 0.44 | -77.9% | 323 |
-| 5 | 0.16% | 0.31 | -81.4% | 323 |
-| 20 | -21.42% | -0.09 | -92.3% | 323 |
-| buy and hold | 56.16% | 0.98 | -83.0% | 0.23 |
+| signal | cost (bps round trip) | annual return | Sharpe | max drawdown | annual turnover |
+|---|---|---|---|---|---|
+| lightgbm | 0 | 8.59% | 0.44 | -77.9% | 323 |
+| lightgbm | 5 | 0.16% | 0.31 | -81.4% | 323 |
+| lightgbm | 20 | -21.42% | -0.09 | -92.3% | 323 |
+| ridge | 0 | -1.85% | 0.34 | -85.5% | 416 |
+| ridge | 5 | -11.55% | 0.19 | -88.6% | 416 |
+| ridge | 20 | -35.30% | -0.25 | -95.7% | 416 |
+| buy and hold | n/a | 56.16% | 0.98 | -83.0% | 0.23 |
 
-Binance spot taker fees are around 10 bps one way, so the realistic column is the last strategy row, not the first.
+Binance spot taker fees are around 10 bps one way, so the realistic row for each signal is the 20 bps one, not the 0 bps one.
+
+Ridge is the sharper test of the two, and it fails earlier. LightGBM at least starts positive and is then eaten by costs, which is the ordinary way a weak signal dies. Ridge loses 1.85% a year *before* anyone charges it anything, while trading 29% more than LightGBM does. Its ranking ability is real, in the sense that the AUC is the best in the study, but the dead zone converts that ranking into positions at the wrong sizes and the wrong moments. The best-ranking model in the study is the worse of the two strategies at every cost level, which is a cleaner statement of the paper's point than the LightGBM curve alone: the problem is not that the edge is small, it is that ranking skill this weak does not survive being turned into a trade.
+
+The Sharpe column disagrees with the return column on the ridge rows, and the reason is worth stating because it is easy to report the flattering half by accident. Sharpe is built from the arithmetic mean of daily returns; annual return is compounded. Ridge at zero cost has an arithmetic mean of +24.0% a year and an annualised volatility of 71.2%, so the variance drag of roughly half the squared volatility, 25.3%, is larger than the mean and the compounded result comes out negative. LightGBM survives the same arithmetic only because it is less volatile, 60.8%, and starts from a higher mean. The compounded number is the one an account would actually experience, so it is the one to read.
 
 ### Where these numbers came from
 
@@ -78,13 +89,14 @@ Each table above is one run directory under `reports/results/`, named by the has
 
 | table | run | command |
 |---|---|---|
-| direction, LightGBM and ARIMA | `13801e32a1` | `src.train --model lightgbm.yaml --model arima.yaml` |
-| direction, ridge | `bae4bde6c8` | `src.train --model ridge.yaml` |
+| direction, ridge, LightGBM and ARIMA | `a08f75962a` | `make train` |
 | direction, sequence models | `a2e2e68684` | `src.train --model lstm.yaml --model cnn.yaml --model dlinear.yaml` |
 | volatility | `96037aadcc` | `src.train --target vol_1d --model garch.yaml` |
-| backtest | `13801e32a1` | `src.run_backtest` |
+| backtest | `a08f75962a` | `src.run_backtest --run reports/results/a08f75962a` |
 
-`make train` now runs ridge, LightGBM and ARIMA together, so it writes a fourth directory with a different hash rather than reproducing either of the first two. The folds and the seed are fixed, so the numbers match; only the hash differs. Every model in a given table was evaluated on the same folds and the same rows as the baselines printed beside it.
+Every model in a given table was evaluated on the same folds and the same rows as the baselines printed beside it. The direction table used to be stitched from two runs, one for ridge and one for LightGBM and ARIMA, which meant the two strongest models had never been compared on the same frame. `make train` now runs all three together, so a single directory holds every number in that table and the Diebold-Mariano column is a comparison rather than a juxtaposition. The earlier directories are still on disk and still reproduce their own rows.
+
+`dm.csv` in each direction run holds the Diebold-Mariano results, so every p-value quoted above has a file behind it rather than a calculation someone did once and threw away. The training run writes it directly; the sequence-model directory predates that and was backfilled from its own stored predictions, which is the same function over the same rows. Pass `--dm-baseline` to compare against something other than the abstaining forecast. That flag deliberately does not enter the hashed config, because changing which comparison you report should not change where the results are written.
 
 ## Why the design looks the way it does
 
@@ -105,7 +117,7 @@ There is a fourth choice worth spelling out because the usual explanation of it 
 ```bash
 pip install -r requirements.txt
 make data      # downloads 392 monthly files, verifies checksums, builds the panel
-make test      # 73 tests, mostly leakage and alignment checks
+make test      # 84 tests, mostly leakage and alignment checks
 make train     # baselines + ARIMA + ridge + LightGBM on direction
 make vol       # baselines + GARCH/EGARCH on volatility
 make deep      # LSTM, 1D CNN, DLinear, 5 seeds each

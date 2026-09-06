@@ -149,13 +149,29 @@ def _score(
     return metric_lib.evaluate_predictions(data.y_test, prediction, task)
 
 
+def default_dm_baseline(target: str) -> str:
+    """The model a Diebold-Mariano test is run against for a given target.
+
+    Direction is compared against the abstaining forecast, because a constant
+    0.5 is the thing a probabilistic model actually has to beat. Volatility is
+    compared against the trailing mean, which is the baseline that wins there.
+    """
+    return "vol_climatology" if target == "vol_1d" else "zero"
+
+
 def run(
     config: dict,
     model_configs: list[dict],
     max_folds: int | None = None,
     quiet: bool = False,
+    dm_baseline: str | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Run every configured model over every fold. Returns (results, predictions)."""
+    """Run every configured model over every fold. Returns (results, predictions).
+
+    ``dm_baseline`` deliberately stays out of ``config``. The run directory is
+    named by a hash of the merged configuration, so a knob that only changes
+    which comparison is reported must not change where the results land.
+    """
     ensure_dirs()
     seed = int(config.get("seed", 42))
     set_global_seed(seed)
@@ -245,7 +261,15 @@ def run(
     predictions = pd.concat(prediction_frames) if prediction_frames else pd.DataFrame()
     importances = pd.concat(importance_frames) if importance_frames else pd.DataFrame()
 
-    _persist(config, model_configs, results, predictions, importances, matrix, quiet)
+    # The test that separates "looks better" from "is better". It is computed
+    # here rather than left to the reader so that every p-value quoted about
+    # this project has a file behind it.
+    dm = dm_table(predictions, y, baseline=dm_baseline or default_dm_baseline(target))
+    if not quiet and not dm.empty:
+        print(f"\nDiebold-Mariano vs {dm['vs_baseline'].iloc[0]}")
+        print(dm[["model", "dm_statistic", "p_value", "better"]].to_string(index=False))
+
+    _persist(config, model_configs, results, predictions, importances, dm, matrix, quiet)
     return results, predictions
 
 
@@ -335,6 +359,7 @@ def _persist(
     results: pd.DataFrame,
     predictions: pd.DataFrame,
     importances: pd.DataFrame,
+    dm: pd.DataFrame,
     matrix,
     quiet: bool,
 ) -> None:
@@ -348,6 +373,8 @@ def _persist(
         predictions.reset_index().to_parquet(out_dir / "predictions.parquet", index=False)
     if not importances.empty:
         importances.to_csv(out_dir / "feature_importance.csv", index=False)
+    if not dm.empty:
+        dm.to_csv(out_dir / "dm.csv", index=False)
 
     (out_dir / "config.json").write_text(json.dumps(merged, indent=2, default=str), encoding="utf-8")
     (out_dir / "features.txt").write_text("\n".join(matrix.feature_names), encoding="utf-8")
@@ -386,6 +413,11 @@ def main() -> None:
     parser.add_argument("--target", default=None, help="override targets.primary")
     parser.add_argument("--scheme", default=None, help="override splits.scheme")
     parser.add_argument("--max-folds", type=int, default=None)
+    parser.add_argument(
+        "--dm-baseline",
+        default=None,
+        help="model the Diebold-Mariano test compares against, defaults per target",
+    )
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -395,7 +427,12 @@ def main() -> None:
         config["splits"]["scheme"] = args.scheme
 
     model_configs = [load_config(path) for path in args.model]
-    results, predictions = run(config, model_configs, max_folds=args.max_folds)
+    results, predictions = run(
+        config,
+        model_configs,
+        max_folds=args.max_folds,
+        dm_baseline=args.dm_baseline,
+    )
 
     if results.empty:
         print("no results produced")

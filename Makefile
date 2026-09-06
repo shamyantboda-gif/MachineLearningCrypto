@@ -2,6 +2,11 @@
 
 PY ?= python
 CONFIG ?= config/base.yaml
+# The run that backs the direction and backtest tables in the README. Pinned
+# because the default is the newest directory by modification time, which
+# reorders whenever a report or a backtest is written. Override on the command
+# line to point report and backtest at a different run.
+RUN ?= reports/results/a08f75962a
 
 help:
 	@echo "make setup     install pinned dependencies"
@@ -10,8 +15,8 @@ help:
 	@echo "make train     baselines + ARIMA + ridge + LightGBM on next-day direction"
 	@echo "make vol       baselines + GARCH on next-day volatility"
 	@echo "make deep      LSTM, CNN and DLinear on next-day direction"
-	@echo "make backtest  cost sweep and equity curves for the newest run"
-	@echo "make report    summary tables and figures for the newest run"
+	@echo "make backtest  cost sweep and equity curves for $(RUN)"
+	@echo "make report    summary tables and figures for $(RUN)"
 	@echo "make all       data, test, train, vol, deep, backtest, report"
 	@echo "make clean     remove generated results and caches, keep raw data"
 
@@ -45,10 +50,10 @@ rolling:
 		--model config/models/lightgbm.yaml
 
 backtest:
-	$(PY) -m src.run_backtest --config $(CONFIG)
+	$(PY) -m src.run_backtest --config $(CONFIG) --run $(RUN)
 
 report:
-	$(PY) -m src.evaluate.report
+	$(PY) -m src.evaluate.report --run $(RUN)
 
 all: data test train vol deep backtest report
 
