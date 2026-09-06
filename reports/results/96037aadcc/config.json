@@ -1,0 +1,105 @@
+{
+  "base": {
+    "run_name": "base",
+    "seed": 42,
+    "data": {
+      "interval": "1d",
+      "symbols": {
+        "BTCUSDT": "BTC",
+        "ETHUSDT": "ETH",
+        "LTCUSDT": "LTC",
+        "SOLUSDT": "SOL"
+      },
+      "start_month": "2017-08",
+      "end_month": "2026-08",
+      "verify_checksums": true,
+      "cross_check": {
+        "enabled": true,
+        "source": "coinbase",
+        "asset": "BTC",
+        "max_abs_pct_diff": 1.0,
+        "min_agreement_frac": 0.99
+      },
+      "auxiliary": {
+        "fear_greed": true,
+        "coinmetrics": true,
+        "fred": false
+      }
+    },
+    "targets": {
+      "primary": "vol_1d",
+      "horizon": 1
+    },
+    "features": {
+      "families": {
+        "price": true,
+        "volume": true,
+        "range": true,
+        "technical": true,
+        "cross_asset": true,
+        "calendar": true,
+        "auxiliary": true
+      },
+      "max_lookback": 90,
+      "winsorize": {
+        "enabled": true,
+        "lower_q": 0.01,
+        "upper_q": 0.99
+      },
+      "scale": "standard"
+    },
+    "splits": {
+      "scheme": "expanding",
+      "train_start": "2018-01-01",
+      "first_test_start": "2020-01-01",
+      "test_months": 3,
+      "step_months": 3,
+      "rolling_train_years": 3,
+      "embargo_days": 5,
+      "inner_val_frac": 0.2,
+      "min_train_rows": 500
+    },
+    "backtest": {
+      "rule": "long_short",
+      "band": 0.02,
+      "threshold": 0.5,
+      "vol_target": {
+        "enabled": false,
+        "annual_target": 0.4,
+        "max_leverage": 1.0
+      },
+      "cost_bps_round_trip": [
+        0.0,
+        5.0,
+        20.0
+      ],
+      "periods_per_year": 365
+    },
+    "evaluate": {
+      "n_seeds": 5,
+      "regimes": {
+        "lookback_days": 90,
+        "bull_threshold": 0.1,
+        "bear_threshold": -0.1
+      }
+    }
+  },
+  "models": [
+    {
+      "model": {
+        "family": "garch",
+        "variants": [
+          "garch11",
+          "egarch11"
+        ],
+        "dist": "t",
+        "rescale_factor": 100.0,
+        "mean": "constant",
+        "calibrations": [
+          "level",
+          "mz"
+        ]
+      }
+    }
+  ]
+}

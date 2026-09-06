@@ -5,9 +5,13 @@ data/
 *.zip
 *.CHECKSUM
 
-# Generated results and figures
-reports/results/
-reports/figures/
+# Results and figures are committed. Every table in the README cites a run
+# directory, and a citation you cannot open is not a citation. The blanket
+# data rules above would otherwise swallow the csv and parquet files, so they
+# are re-included here. Negation only works because no parent directory of
+# these paths is itself excluded; do not add `reports/` above.
+!reports/results/**/*.csv
+!reports/results/**/*.parquet
 reports/data_quality.md
 mlruns/
 

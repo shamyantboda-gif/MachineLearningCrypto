@@ -85,7 +85,7 @@ The Sharpe column disagrees with the return column on the ridge rows, and the re
 
 ### Where these numbers came from
 
-Each table above is one run directory under `reports/results/`, named by the hash of its config.
+Each table above is one run directory under `reports/results/`, named by the hash of its config. Those directories are committed, predictions included, so any number here can be checked without retraining anything. The raw data is not, because it is large and `make data` rebuilds it exactly.
 
 | table | run | command |
 |---|---|---|
