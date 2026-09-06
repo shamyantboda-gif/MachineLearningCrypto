@@ -1,0 +1,4 @@
+model:
+  family: baselines
+  variants: [zero, persistence, historical_mean, majority_class]
+  historical_mean_window: 63

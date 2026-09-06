@@ -1,0 +1,86 @@
+# Base experiment configuration.
+# Every number that affects a result lives in a YAML file, not in code.
+# The merged config is hashed and that hash names the run directory.
+
+run_name: base
+seed: 42
+
+data:
+  interval: 1d
+  # Symbol -> short asset code used throughout the panel.
+  symbols:
+    BTCUSDT: BTC
+    ETHUSDT: ETH
+    LTCUSDT: LTC
+    SOLUSDT: SOL
+  # Archive months to attempt. The fetcher stops at the first missing tail month
+  # and skips leading months before a symbol was listed.
+  start_month: "2017-08"
+  end_month: "2026-08"
+  verify_checksums: true
+  # Cross-check source. Coinbase quotes USD, Binance quotes USDT, so a small
+  # persistent basis is expected.
+  cross_check:
+    enabled: true
+    source: coinbase
+    asset: BTC
+    max_abs_pct_diff: 1.0
+    min_agreement_frac: 0.99
+  auxiliary:
+    fear_greed: true
+    coinmetrics: true
+    fred: false          # needs a key for reliable access; off by default
+
+targets:
+  # Which target this run trains and evaluates.
+  # ret_1d  -> next-day log return (regression)
+  # dir_1d  -> next-day direction (binary classification)
+  # vol_1d  -> log next-day Parkinson volatility (regression)
+  primary: dir_1d
+  horizon: 1
+
+features:
+  # Toggleable families. Ablations flip these off one at a time.
+  families:
+    price: true
+    volume: true
+    range: true
+    technical: true
+    cross_asset: true
+    calendar: true
+    auxiliary: true
+  max_lookback: 90        # longest rolling window (px_cumret_90); also the warmup dropped per asset
+  winsorize:
+    enabled: true
+    lower_q: 0.01
+    upper_q: 0.99
+  scale: standard         # standard | none. Fit on the training fold only.
+
+splits:
+  scheme: expanding       # expanding | rolling
+  train_start: "2018-01-01"
+  first_test_start: "2020-01-01"
+  test_months: 3          # one quarter per test window
+  step_months: 3
+  rolling_train_years: 3  # only used when scheme == rolling
+  embargo_days: 5
+  inner_val_frac: 0.2     # most recent slice of train, for early stopping
+  min_train_rows: 500
+
+backtest:
+  rule: long_short        # long_only | long_short
+  band: 0.02              # dead zone around 0.5 for long_short
+  threshold: 0.5          # entry level for long_only
+  vol_target:
+    enabled: false
+    annual_target: 0.40
+    max_leverage: 1.0
+  cost_bps_round_trip: [0.0, 5.0, 20.0]
+  periods_per_year: 365
+
+evaluate:
+  n_seeds: 5              # deep models are trained this many times
+  regimes:
+    lookback_days: 90
+    bull_threshold: 0.10  # trailing 90d return above this is a bull window
+    bear_threshold: -0.10

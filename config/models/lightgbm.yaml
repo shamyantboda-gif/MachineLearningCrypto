@@ -1,0 +1,16 @@
+model:
+  family: lightgbm
+  params:
+    n_estimators: 2000
+    learning_rate: 0.02
+    max_depth: 4
+    num_leaves: 15
+    min_child_samples: 60
+    subsample: 0.8
+    subsample_freq: 1
+    colsample_bytree: 0.7
+    reg_lambda: 5.0
+    reg_alpha: 0.5
+    verbosity: -1
+  early_stopping_rounds: 100
+  shap: true

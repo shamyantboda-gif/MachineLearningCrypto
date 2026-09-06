@@ -1,0 +1,26 @@
+# Data is never committed. Rebuild it with `make data`.
+data/
+*.parquet
+*.csv
+*.zip
+*.CHECKSUM
+
+# Generated results and figures
+reports/results/
+reports/figures/
+reports/data_quality.md
+mlruns/
+
+# Secrets
+.env
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+.ruff_cache/

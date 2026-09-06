@@ -1,0 +1,9 @@
+model:
+  family: arima
+  # Grid searched per asset per fold by AIC. d is fixed at 0 because the
+  # target is already a return series.
+  p_range: [0, 1, 2, 3]
+  d: 0
+  q_range: [0, 1, 2, 3]
+  ic: aic
+  max_train_obs: 2000

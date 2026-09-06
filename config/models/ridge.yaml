@@ -1,0 +1,10 @@
+# L2-penalised linear model. The control the non-linear families have to beat.
+model:
+  family: ridge
+  # Searched on the inner validation slice, per fold. For a classification
+  # target these become C = 1 / alpha inside the logistic fit.
+  alphas: [0.1, 1.0, 10.0, 100.0, 1000.0]
+  # Used when the fold's validation slice is empty or single class.
+  default_alpha: 10.0
+  fit_intercept: true
+  max_iter: 1000

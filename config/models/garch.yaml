@@ -1,0 +1,9 @@
+model:
+  family: garch
+  variants: [garch11, egarch11]
+  dist: t                 # standardized Student-t, crypto returns are fat tailed
+  rescale_factor: 100.0   # arch prefers percent returns for conditioning
+  mean: constant
+  # Both train-only corrections for the close-to-close versus range
+  # definitional gap are run and both are reported.
+  calibrations: [level, mz]

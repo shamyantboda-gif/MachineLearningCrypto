@@ -1,0 +1,12 @@
+[project]
+name = "crypto-forecasting"
+version = "1.0.0"
+requires-python = ">=3.11"
+description = "Walk-forward evaluation of forecasting models on daily cryptocurrency returns"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
