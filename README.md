@@ -1,6 +1,8 @@
 # Forecasting daily cryptocurrency returns
 
-A walk-forward evaluation of seven model families against four naive baselines, on daily bars for BTC, ETH, LTC and SOL, from August 2017 to July 2026. The question is whether any of them beat those baselines once you refuse to let them see the future and once you charge them for trading.
+A walk-forward evaluation of seven model families against four naive baselines, on daily bars for BTC, ETH, LTC and SOL. The question is whether any of them beat those baselines once you refuse to let them see the future and once you charge them for trading.
+
+The four assets do not share a history. BTC and ETH go back to August 2017, LTC to December 2017, and SOL only to August 2020, because that is when each pair was listed on Binance. Everything is scored on the same test windows from January 2020 to July 2026, but SOL is absent from the first three folds and contributes 2,090 of the 9,299 scored rows against 2,403 for each of the others. That asymmetry is stated wherever it changes how a number should be read, rather than averaged away.
 
 The short answer is no, and the interesting part is the shape of the failure.
 
@@ -49,6 +51,8 @@ The three sequence models were run separately with five seeds each, on the same 
 None of them reached the 51.12% base rate. Diebold-Mariano against the abstaining baseline puts DLinear and the CNN significantly worse (p below 0.001) and the LSTM indistinguishable (p = 0.20). DLinear is a single linear layer over a decomposed input and it finished within 0.12 percentage points of the LSTM while training in a fifth of the time, 3.6 seconds per fit against 7.6 for the LSTM and 13.5 for the CNN. That is the Zeng et al. point reproduced on this dataset: the recurrent and convolutional machinery bought nothing here. Taken with the ridge result, the ordering across all seven families is close to the reverse of their complexity.
 
 Per asset, LightGBM's accuracy minus that asset's own base rate: BTC +0.70pp, LTC +0.66pp, SOL +0.40pp, ETH -0.43pp. The gradient does not match the efficiency story. If less liquid markets were more predictable, SOL should lead and BTC should trail, and neither happens.
+
+Read that row of numbers with the coverage in mind. SOL is not measured over the same period as the other three: it was listed in August 2020, so it misses folds 0 through 2 entirely and is scored on 2,090 rows against 2,403 for each of the others. Its figure excludes the early 2020 folds and rests on 13% less data, which is enough to move a 0.40pp edge around on its own. The comparison is suggestive at best, and it is a weaker piece of evidence than the fold-to-fold spread that surrounds it.
 
 By regime, LightGBM's edge over the base rate is +0.42pp in bear markets, +0.46pp sideways, and +0.04pp in bull markets. All three sit well inside the fold-to-fold spread.
 
@@ -135,14 +139,20 @@ Python 3.11 or newer. Developed and run on 3.14.3 with pandas 3.0.5, numpy 2.5.2
 
 Daily klines from the Binance public archive at `data.binance.vision`, which is a static file host with no key and no rate limit. Every monthly zip ships a SHA256 checksum and `src/data/fetch_binance.py` verifies all of them.
 
-| asset | symbol | first bar | bars |
-|---|---|---|---|
-| Bitcoin | BTCUSDT | 2017-08-17 | 3,271 |
-| Ethereum | ETHUSDT | 2017-08-17 | 3,271 |
-| Litecoin | LTCUSDT | 2017-12-13 | 3,153 |
-| Solana | SOLUSDT | 2020-08-11 | 2,181 |
+| asset | symbol | first bar | bars | first bar scored | bars scored | enters at fold |
+|---|---|---|---|---|---|---|
+| Bitcoin | BTCUSDT | 2017-08-17 | 3,271 | 2020-01-01 | 2,403 | 0 |
+| Ethereum | ETHUSDT | 2017-08-17 | 3,271 | 2020-01-01 | 2,403 | 0 |
+| Litecoin | LTCUSDT | 2017-12-13 | 3,153 | 2020-01-01 | 2,403 | 0 |
+| Solana | SOLUSDT | 2020-08-11 | 2,181 | 2020-11-09 | 2,090 | 3 |
 
 11,876 rows total, no gaps, no duplicate timestamps, no OHLC ordering violations, no zero-volume bars.
+
+The last three columns are the ones to read the results against, and they are not the first three. A bar has to clear two hurdles before it can be scored. It has to fall inside a test window, and the first of those opens on 2020-01-01. And it has to be at least 90 bars after that asset's own listing, because `px_cumret_90` is the longest rolling window and an asset has no features until it has filled it.
+
+For BTC, ETH and LTC the second hurdle costs history they had to spare, so both reduce to the first: they are scored from 2020-01-01. For SOL, listed on 2020-08-11, the warmup runs to 2020-11-09, which is where its first scored bar sits. It does not exist in folds 0 through 2 at all. Those three folds are evaluated on three assets and the remaining twenty-four on four.
+
+The long format carries this cleanly, which is one practical argument for it over a wide frame. A column per asset has to do something about every date SOL is missing: drop those rows and you throw away two and a half years of BTC, ETH and LTC, or fill them and you invent returns. One row per asset-date just lets an asset start when it started.
 
 One thing in that fetcher is worth knowing about if you write your own. Binance switched the archive from millisecond to microsecond timestamps partway through, and a single symbol's history contains both. Detecting the unit once from the first row parses every later bar as a date in the year 56971. The unit has to be decided per row.
 
@@ -236,7 +246,7 @@ Named rather than quietly omitted:
 
 **Survivorship bias.** BTC, ETH, LTC and SOL were chosen because they have long clean histories, which means they were chosen because they survived. A model that fails on survivors would probably fail worse on the full universe, so the direction of this bias happens to be conservative here. It would not be if the result had been positive.
 
-**Four assets is a small cross-section.** Crypto returns are heavily correlated, so four assets provide considerably less than four times the information of one. The cross-sectional features in particular are working with a very thin panel.
+**Four assets is a small cross-section, and one of them is late.** Crypto returns are heavily correlated, so four assets provide considerably less than four times the information of one. The cross-sectional features in particular are working with a very thin panel, and for the first three folds they are working with three assets rather than four, because SOL was not listed until August 2020. Any statement here that compares assets to each other is comparing different windows as well as different assets.
 
 **One horizon.** Everything predicts one day ahead. Skill typically decays with horizon and the shape of that decay is a real result this project does not have.
 
