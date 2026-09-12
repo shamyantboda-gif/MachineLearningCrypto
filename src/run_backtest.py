@@ -39,12 +39,8 @@ def forward_returns_for(index: pd.MultiIndex, config: dict) -> pd.Series:
     return matrix.meta[FWD_SIMPLE_RETURN].reindex(index)
 
 
-def backtest_model(
-    predictions: pd.DataFrame,
-    model: str,
-    config: dict,
-) -> tuple[pd.DataFrame, dict[str, pd.Series]]:
-    """Cost sweep and equity curves for one model's predictions."""
+def positions_for(predictions: pd.DataFrame, model: str, config: dict) -> pd.Series:
+    """Turn one model's predictions into positions under the configured rule."""
     subset = predictions[predictions["model"] == model]
     if subset.empty:
         raise ValueError(f"no predictions for model {model!r}")
@@ -56,7 +52,7 @@ def backtest_model(
     signal = signal.sort_index()
 
     backtest_cfg = config["backtest"]
-    positions = signal_to_position(
+    return signal_to_position(
         signal,
         rule=backtest_cfg.get("rule", "long_short"),
         threshold=backtest_cfg.get("threshold", 0.5),
@@ -64,10 +60,53 @@ def backtest_model(
         periods_per_year=backtest_cfg.get("periods_per_year", 365),
     )
 
+
+def per_asset_sweep(
+    positions: pd.Series,
+    forward: pd.Series,
+    config: dict,
+) -> pd.DataFrame:
+    """The cost sweep run on each asset alone, as a standalone book.
+
+    This is a different number from an asset's share of the equal-weight
+    portfolio, which the engine also keeps. A reader who sees "BTC: 8%" will
+    take it to mean trading BTC on its own, so that is what is computed: the
+    engine's equal weighting reduces to unit positions when only one asset is
+    present, and the buy-and-hold row is that one asset held.
+    """
+    backtest_cfg = config["backtest"]
+    levels = [float(x) for x in backtest_cfg.get("cost_bps_round_trip", [0.0, 5.0, 20.0])]
+    assets = positions.index.get_level_values(schema.ASSET)
+    frames = []
+    for asset in sorted(assets.unique()):
+        mask = assets == asset
+        sweep = cost_sweep(
+            positions[mask],
+            forward[mask],
+            levels,
+            periods_per_year=backtest_cfg.get("periods_per_year", 365),
+        )
+        sweep.insert(0, "asset", str(asset))
+        frames.append(sweep)
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def backtest_model(
+    predictions: pd.DataFrame,
+    model: str,
+    config: dict,
+) -> tuple[pd.DataFrame, dict[str, pd.Series], pd.DataFrame]:
+    """Cost sweep, equity curves and the per-asset sweep for one model."""
+    positions = positions_for(predictions, model, config)
+
     forward = forward_returns_for(positions.index, config)
     keep = forward.notna()
     positions, forward = positions[keep], forward[keep]
 
+    by_asset = per_asset_sweep(positions, forward, config)
+    by_asset.insert(0, "model", model)
+
+    backtest_cfg = config["backtest"]
     levels = [float(x) for x in backtest_cfg.get("cost_bps_round_trip", [0.0, 5.0, 20.0])]
     sweep = cost_sweep(
         positions,
@@ -90,7 +129,7 @@ def backtest_model(
         forward, periods_per_year=backtest_cfg.get("periods_per_year", 365)
     ).equity
 
-    return sweep, curves
+    return sweep, curves, by_asset
 
 
 def main() -> None:
@@ -114,15 +153,16 @@ def main() -> None:
         return
 
     models = args.model or sorted(predictions["model"].unique())
-    sweeps, all_curves = [], {}
+    sweeps, all_curves, asset_sweeps = [], {}, []
 
     for model in models:
         try:
-            sweep, curves = backtest_model(predictions, model, config)
+            sweep, curves, by_asset = backtest_model(predictions, model, config)
         except Exception as error:
             print(f"  {model}: {error}")
             continue
         sweeps.append(sweep)
+        asset_sweeps.append(by_asset)
         all_curves.update(curves)
         print(f"  {model}: backtested at {len(sweep) - 1} cost levels")
 
@@ -134,6 +174,14 @@ def main() -> None:
     out_path = run_dir / "backtest.csv"
     combined.to_csv(out_path, index=False)
     print(f"\nwrote {out_path}")
+
+    # Each asset traded on its own, next to the portfolio. The portfolio row
+    # is not the average of these: an asset only carries weight on the days it
+    # holds a position.
+    per_asset = pd.concat(asset_sweeps, ignore_index=True)
+    per_asset_path = run_dir / "backtest_per_asset.csv"
+    per_asset.to_csv(per_asset_path, index=False)
+    print(f"wrote {per_asset_path}")
 
     columns = [
         c
