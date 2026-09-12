@@ -24,6 +24,7 @@ from src import schema
 from src.config import REPO_ROOT
 from src.data.targets import build_targets
 from src.features.registry import build_features
+from src.models.arima import _returns_by_asset
 from src.models.base import CLASSIFICATION, REGRESSION, FoldData
 from src.models.baselines import build_baselines
 from src.preprocess import FoldPreprocessor
@@ -820,6 +821,43 @@ def test_garch_recursion_reproduces_arch_on_the_training_window(
             f"the recursion for {asset} diverges from arch's own by "
             f"{relative[burn_in:].max():.2e} after burn-in, so it is not "
             "computing the model that was fitted"
+        )
+
+
+def test_a_rejected_garch_fit_falls_back_to_the_training_variance(
+    synthetic_panel, base_config, monkeypatch
+):
+    """An asset whose fit fails the stationarity guard still gets a real fallback.
+
+    Found on BTC, where the Student-t GARCH(1,1) fits as integrated in every
+    fold and the guard rejects it. The fallback used to be a hard-coded
+    log(1e-4), about one percent daily volatility, a quarter of what BTC
+    realises; scored on QLIKE that constant made the pooled GARCH row look like
+    a calibration problem when it was a missing forecast. A rejected fit must
+    degrade to the training variance, the same climatology a baseline would
+    print, so the number in the table is at least the right order of magnitude.
+    """
+    from src.models.garch import GarchModel
+
+    matrix = _synthetic_matrix(synthetic_panel, base_config)
+    _, folds = _folds(matrix.X.index)
+    fold_data = _fold_data(matrix, folds[-1], "vol_1d")
+
+    model = GarchModel(params={"variant": "garch11"}, task=REGRESSION)
+    monkeypatch.setattr(model, "_is_stable", lambda params: False)
+    model.fit(fold_data)
+
+    assert not model.fitted_params_, "the guard was disabled, so nothing should have been kept"
+    assets = set(_returns_by_asset(fold_data.meta_train))
+    assert set(model.fallback_log_var_) == assets
+
+    predictions = _garch_predictions(model, fold_data.meta_test)
+    for asset, series in _returns_by_asset(fold_data.meta_train).items():
+        expected = float(np.log((series.dropna()).var()))
+        rows = fold_data.meta_test.index.get_level_values(schema.ASSET) == asset
+        assert np.allclose(predictions[rows], expected), (
+            f"{asset}: rejected fit fell back to {predictions[rows][0]:.3f}, "
+            f"expected the training log variance {expected:.3f}"
         )
 
 

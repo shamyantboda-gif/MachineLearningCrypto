@@ -208,6 +208,21 @@ def score_prediction(
     return metric_lib.evaluate_predictions(y_true, prediction, task)
 
 
+def default_dm_loss(target: str) -> str:
+    """The loss the Diebold-Mariano test is run under for a given target.
+
+    It has to be the loss the headline metric is computed on, or the two
+    columns can disagree about the same forecasts. Direction is scored on
+    Brier, which is squared loss on the probability. Volatility is scored on
+    QLIKE, which is asymmetric: under-predicting variance costs far more than
+    over-predicting it by the same factor, and squared error on log variance
+    does not know that. A GARCH that never under-predicts can win on QLIKE and
+    lose on log squared error at the same time, which is not a contradiction,
+    but a table that shows both without saying so reads as one.
+    """
+    return "qlike" if target == "vol_1d" else "squared"
+
+
 def default_dm_baseline(target: str) -> str:
     """The model a Diebold-Mariano test is run against for a given target.
 
@@ -324,7 +339,8 @@ def run(
     # here rather than left to the reader so that every p-value quoted about
     # this project has a file behind it.
     baseline = dm_baseline or default_dm_baseline(target)
-    dm = dm_table(predictions, y, baseline=baseline)
+    loss = default_dm_loss(target)
+    dm = dm_table(predictions, y, baseline=baseline, loss=loss)
     if not quiet and not dm.empty:
         print(f"\nDiebold-Mariano vs {baseline}")
         print(dm[["model", "dm_statistic", "p_value", "better"]].to_string(index=False))
@@ -332,7 +348,7 @@ def run(
     # The same predictions, split by asset. A pooled number can hide skill
     # that lives on one asset, or hide one asset dragging the others down.
     per_asset = per_asset_results(predictions, y, task, target)
-    per_asset_dm = dm_per_asset(predictions, y, baseline=baseline)
+    per_asset_dm = dm_per_asset(predictions, y, baseline=baseline, loss=loss)
 
     # The truth travels with the predictions so a report can be rebuilt from
     # the run directory alone, without recomputing the feature matrix.
@@ -453,6 +469,12 @@ def dm_table(
         return pd.DataFrame()
 
     truth = y.reindex(pooled.index)
+    if loss == "qlike":
+        # QLIKE is defined on variances. The vol_1d target and its forecasts
+        # are stored as log variance, so both sides are exponentiated here,
+        # exactly as score_prediction does before computing the headline QLIKE.
+        pooled = np.exp(pooled)
+        truth = np.exp(truth)
     rows = []
     for model in pooled.columns:
         if model == baseline:
@@ -468,6 +490,7 @@ def dm_table(
             {
                 "model": model,
                 "vs_baseline": baseline,
+                "loss": loss,
                 "dm_statistic": result.statistic,
                 "p_value": result.p_value,
                 "mean_loss_diff": result.mean_loss_diff,

@@ -12,7 +12,7 @@ help:
 	@echo "make setup     install pinned dependencies"
 	@echo "make data      download the archive, build and validate the panel"
 	@echo "make test      run the leakage, alignment and causality suite"
-	@echo "make train     baselines + ARIMA + ridge + LightGBM on next-day direction"
+	@echo "make train     baselines + ARIMA + ridge + LightGBM, pooled and per asset, on next-day direction"
 	@echo "make vol       baselines + GARCH on next-day volatility"
 	@echo "make deep      LSTM, CNN and DLinear on next-day direction"
 	@echo "make backtest  cost sweep and equity curves for $(RUN)"
@@ -32,7 +32,9 @@ test:
 train:
 	$(PY) -m src.train --config $(CONFIG) \
 		--model config/models/ridge.yaml \
+		--model config/models/ridge_per_asset.yaml \
 		--model config/models/lightgbm.yaml \
+		--model config/models/lightgbm_per_asset.yaml \
 		--model config/models/arima.yaml
 
 vol:
@@ -42,8 +44,11 @@ vol:
 deep:
 	$(PY) -m src.train --config $(CONFIG) \
 		--model config/models/lstm.yaml \
+		--model config/models/lstm_per_asset.yaml \
 		--model config/models/cnn.yaml \
-		--model config/models/dlinear.yaml
+		--model config/models/cnn_per_asset.yaml \
+		--model config/models/dlinear.yaml \
+		--model config/models/dlinear_per_asset.yaml
 
 rolling:
 	$(PY) -m src.train --config $(CONFIG) --scheme rolling \

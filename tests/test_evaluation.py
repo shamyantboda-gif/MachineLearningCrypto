@@ -20,6 +20,7 @@ from src.evaluate.report import scope_comparison
 from src.train import (
     build_models,
     default_dm_baseline,
+    default_dm_loss,
     dm_per_asset,
     dm_table,
     per_asset_results,
@@ -201,3 +202,43 @@ def test_scope_comparison_is_empty_without_a_per_asset_arm(predictions_and_truth
     predictions, truth = predictions_and_truth
     frame = predictions.assign(y_true=truth.reindex(predictions.index))
     assert scope_comparison(frame).empty
+
+
+@pytest.mark.parametrize(
+    ("target", "expected"),
+    [("dir_1d", "squared"), ("ret_1d", "squared"), ("vol_1d", "qlike")],
+)
+def test_default_dm_loss_matches_the_headline_metric(target, expected):
+    assert default_dm_loss(target) == expected
+
+
+def test_dm_table_under_qlike_scores_variances_not_log_variances():
+    """A log-variance run tested under QLIKE must exponentiate first.
+
+    Two forecasts of log variance: ``tight`` is the truth plus small noise,
+    ``under`` is the truth minus one, so it under-predicts variance by a factor
+    of e everywhere. Under squared loss on the log scale, ``under`` is off by a
+    constant 1.0 and ``tight`` by ~0.01, so both losses agree that ``tight`` is
+    better. The point of the test is that the QLIKE path runs at all on this
+    input, which it cannot if the frame is passed through as logs: QLIKE
+    raises on a non-positive "variance", and log variances are negative.
+    """
+    rng = np.random.default_rng(3)
+    index = pd.MultiIndex.from_product(
+        [["BTC"], pd.date_range("2021-01-01", periods=300, freq="D", tz="UTC")],
+        names=["asset", "date"],
+    )
+    truth = pd.Series(rng.normal(loc=-7.0, scale=0.5, size=len(index)), index=index)
+    frames = [
+        pd.DataFrame({"pred": truth + rng.normal(scale=0.1, size=len(index)), "model": "tight"}, index=index),
+        pd.DataFrame({"pred": truth - 1.0, "model": "under"}, index=index),
+    ]
+    predictions = pd.concat(frames)
+
+    table = dm_table(predictions, truth, baseline="under", loss="qlike")
+
+    assert list(table["model"]) == ["tight"]
+    row = table.iloc[0]
+    assert row["loss"] == "qlike"
+    assert row["dm_statistic"] < 0 and row["better"] == "a"
+    assert np.isfinite(row["p_value"])

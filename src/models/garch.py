@@ -163,6 +163,16 @@ class GarchModel(Model):
             clean = series.dropna() * _PERCENT
             if len(clean) < 250:
                 continue
+            # Fallback for any test row the model cannot reach: the training
+            # variance, which is a constant volatility forecast. Set before the
+            # fit so an asset whose fit is rejected below degrades to
+            # climatology rather than to an arbitrary constant. On BTC the
+            # Student-t GARCH(1,1) fits as integrated in every fold and is
+            # rejected; with the old hard-coded log(1e-4) fallback its QLIKE
+            # read as a calibration failure when it was a missing forecast.
+            self.fallback_log_var_[asset] = float(
+                np.log(np.maximum((clean / _PERCENT).var(), 1e-12))
+            )
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
@@ -180,11 +190,6 @@ class GarchModel(Model):
                     continue
                 self.fitted_params_[asset] = result.params
                 self.train_series_[asset] = clean
-                # Fallback for any test row the model cannot reach: the training
-                # median log variance, which is a constant volatility forecast.
-                self.fallback_log_var_[asset] = float(
-                    np.log(np.maximum((clean / _PERCENT).var(), 1e-12))
-                )
                 self.calibration_[asset] = self._estimate_calibration(asset, result, fold)
                 self.bounds_[asset] = self._training_bounds(asset, fold)
             except Exception:
