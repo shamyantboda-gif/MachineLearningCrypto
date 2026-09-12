@@ -45,7 +45,6 @@ class PerAssetModel(Model):
         self._build = build
         template = build()
         self.name = f"{template.name}{SCOPE_SUFFIX}"
-        self.wants_raw_features = template.wants_raw_features
         self.is_stochastic = template.is_stochastic
         self.min_train_rows = int(min_train_rows)
         self.models_: dict[str, Model] = {}

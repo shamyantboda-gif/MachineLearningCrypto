@@ -25,6 +25,7 @@ from src.config import load_config
 from src.data.build_panel import load_auxiliary, load_panel
 from src.data.targets import FWD_SIMPLE_RETURN
 from src.evaluate.report import latest_run, load_run, plot_equity_curves
+from src.evaluate.tables import seed_averaged
 from src.features.registry import build_features
 
 
@@ -48,17 +49,27 @@ def positions_for(predictions: pd.DataFrame, model: str, config: dict) -> pd.Ser
     # Averaging across seeds first is the honest way to trade a stochastic
     # model: you would not get to pick the lucky seed in advance.
     signal_column = "proba" if "proba" in subset.columns else "pred"
-    signal = subset.groupby(level=[schema.ASSET, schema.DATE], observed=True)[signal_column].mean()
-    signal = signal.sort_index()
+    # Rows with no forecast stay in the book as flat days rather than dropping
+    # out of the calendar, so turnover and buy and hold see the same dates.
+    dates = subset.index.unique().sort_values()
+    signal = seed_averaged(subset, signal_column)[model].reindex(dates)
 
     backtest_cfg = config["backtest"]
+    _, periods_per_year = _backtest_settings(config)
     return signal_to_position(
         signal,
         rule=backtest_cfg.get("rule", "long_short"),
         threshold=backtest_cfg.get("threshold", 0.5),
         band=backtest_cfg.get("band", 0.02),
-        periods_per_year=backtest_cfg.get("periods_per_year", 365),
+        periods_per_year=periods_per_year,
     )
+
+
+def _backtest_settings(config: dict) -> tuple[list[float], int]:
+    """Cost levels and calendar the sweep runs under, read once."""
+    backtest_cfg = config["backtest"]
+    levels = [float(x) for x in backtest_cfg.get("cost_bps_round_trip", [0.0, 5.0, 20.0])]
+    return levels, int(backtest_cfg.get("periods_per_year", 365))
 
 
 def per_asset_sweep(
@@ -74,18 +85,12 @@ def per_asset_sweep(
     engine's equal weighting reduces to unit positions when only one asset is
     present, and the buy-and-hold row is that one asset held.
     """
-    backtest_cfg = config["backtest"]
-    levels = [float(x) for x in backtest_cfg.get("cost_bps_round_trip", [0.0, 5.0, 20.0])]
+    levels, periods_per_year = _backtest_settings(config)
     assets = positions.index.get_level_values(schema.ASSET)
     frames = []
     for asset in sorted(assets.unique()):
         mask = assets == asset
-        sweep = cost_sweep(
-            positions[mask],
-            forward[mask],
-            levels,
-            periods_per_year=backtest_cfg.get("periods_per_year", 365),
-        )
+        sweep = cost_sweep(positions[mask], forward[mask], levels, periods_per_year=periods_per_year)
         sweep.insert(0, "asset", str(asset))
         frames.append(sweep)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
@@ -106,28 +111,17 @@ def backtest_model(
     by_asset = per_asset_sweep(positions, forward, config)
     by_asset.insert(0, "model", model)
 
-    backtest_cfg = config["backtest"]
-    levels = [float(x) for x in backtest_cfg.get("cost_bps_round_trip", [0.0, 5.0, 20.0])]
-    sweep = cost_sweep(
-        positions,
-        forward,
-        levels,
-        periods_per_year=backtest_cfg.get("periods_per_year", 365),
-    )
+    levels, periods_per_year = _backtest_settings(config)
+    sweep = cost_sweep(positions, forward, levels, periods_per_year=periods_per_year)
     sweep.insert(0, "model", model)
 
     curves: dict[str, pd.Series] = {}
     for level in levels:
         result = run_backtest(
-            positions,
-            forward,
-            CostModel.from_round_trip_bps(level),
-            periods_per_year=backtest_cfg.get("periods_per_year", 365),
+            positions, forward, CostModel.from_round_trip_bps(level), periods_per_year=periods_per_year
         )
         curves[f"{model} at {level:g} bps"] = result.equity
-    curves["buy and hold"] = buy_and_hold(
-        forward, periods_per_year=backtest_cfg.get("periods_per_year", 365)
-    ).equity
+    curves["buy and hold"] = buy_and_hold(forward, periods_per_year=periods_per_year).equity
 
     return sweep, curves, by_asset
 

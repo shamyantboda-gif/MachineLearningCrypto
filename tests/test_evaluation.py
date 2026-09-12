@@ -17,14 +17,14 @@ import pytest
 from src.config import load_config
 from src.models.base import CLASSIFICATION, REGRESSION
 from src.evaluate.report import scope_comparison
-from src.train import (
-    build_models,
+from src.evaluate.tables import (
     default_dm_baseline,
     default_dm_loss,
     dm_per_asset,
     dm_table,
     per_asset_results,
 )
+from src.train import build_models
 
 # Family name -> the config that selects it and the class it must produce.
 REGISTRY_CASES = {

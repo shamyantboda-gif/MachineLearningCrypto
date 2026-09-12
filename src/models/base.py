@@ -104,8 +104,6 @@ class Model(ABC):
 
     #: short identifier used in results tables and filenames
     name: str = "model"
-    #: set True by families that ignore the scaled matrix and read raw columns
-    wants_raw_features: bool = False
     #: set True by families whose output varies with the random seed
     is_stochastic: bool = False
 

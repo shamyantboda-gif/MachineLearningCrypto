@@ -22,6 +22,7 @@ import pandas as pd
 
 from src import schema
 from src.config import FIGURES_DIR, RESULTS_DIR
+from src.models.per_asset import SCOPE_SUFFIX
 
 # Metrics worth putting in a summary table, in the order a reader wants them.
 CLASSIFICATION_COLUMNS = [
@@ -203,9 +204,6 @@ def per_asset_breakdown(predictions: pd.DataFrame, y_true: pd.Series) -> pd.Data
     )
 
 
-PER_ASSET_SUFFIX = "_per_asset"
-
-
 def scope_comparison(predictions: pd.DataFrame) -> pd.DataFrame:
     """Pooled fit against per-asset fit of the same family, on common rows only.
 
@@ -223,27 +221,20 @@ def scope_comparison(predictions: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     from src.evaluate.diebold_mariano import diebold_mariano
+    from src.evaluate.tables import seed_averaged
 
     models = set(predictions["model"].unique())
     pairs = [
-        (name, name + PER_ASSET_SUFFIX)
+        (name, name + SCOPE_SUFFIX)
         for name in sorted(models)
-        if name + PER_ASSET_SUFFIX in models
+        if name + SCOPE_SUFFIX in models
     ]
     if not pairs:
         return pd.DataFrame()
 
     column = "proba" if "proba" in predictions.columns else "pred"
     metric = "accuracy" if column == "proba" else "rmse"
-    usable = predictions.dropna(subset=[column])
-    # Average a stochastic model over its seeds first, the same way dm_table and
-    # the backtest do, so a comparison is between families and not between
-    # lucky draws.
-    signal = (
-        usable.groupby([schema.ASSET, schema.DATE, "model"], observed=True)[column]
-        .mean()
-        .unstack("model")
-    )
+    signal = seed_averaged(predictions, column)
     truth = predictions["y_true"].groupby(level=[schema.ASSET, schema.DATE]).first()
     truth = truth.reindex(signal.index)
     assets = signal.index.get_level_values(schema.ASSET)
@@ -251,8 +242,8 @@ def scope_comparison(predictions: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for pooled, per_asset in pairs:
         if pooled not in signal.columns or per_asset not in signal.columns:
-            # An arm that never produced a forecast has no column after the
-            # NaN rows are dropped. There is nothing to compare it against.
+            # An arm that never produced a forecast has no column. There is
+            # nothing to compare it against.
             continue
         both = truth.notna() & signal[pooled].notna() & signal[per_asset].notna()
         for asset in [*sorted(assets.unique()), "all"]:
@@ -356,6 +347,42 @@ def _read_optional(path: Path) -> pd.DataFrame:
     return pd.read_csv(path) if path.exists() else pd.DataFrame()
 
 
+def _per_asset_sections(run_dir: Path, predictions: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    """The three per-asset tables of a report, keyed by heading.
+
+    The first two are written by the runner and read back for the same reason
+    as dm.csv: the report must show the numbers the run produced. The third is
+    computed here from the stored predictions because it needs no fitting.
+    """
+    per_asset = _read_optional(run_dir / "per_asset.csv")
+    if not per_asset.empty:
+        keep = [
+            c
+            for c in ["model", "asset", "n_folds", "n_obs", *CLASSIFICATION_COLUMNS,
+                      "qlike", "mz_beta", "mz_r2", "rmse_log"]
+            if c in per_asset.columns
+        ]
+        per_asset = per_asset[keep].set_index(["model", "asset"]).round(4)
+
+    per_asset_dm = _read_optional(run_dir / "dm_per_asset.csv")
+    dm_heading = "Diebold-Mariano, per asset"
+    if not per_asset_dm.empty:
+        dm_heading = f"Diebold-Mariano vs {per_asset_dm['vs_baseline'].iloc[0]}, per asset"
+        per_asset_dm = per_asset_dm.drop(columns=["vs_baseline", "note"], errors="ignore").set_index(
+            ["model", "asset"]
+        )
+
+    scope = scope_comparison(predictions)
+    if not scope.empty:
+        scope = scope.set_index(["family", "asset"])
+
+    return {
+        "By asset, rows pooled across folds and seeds": per_asset,
+        dm_heading: per_asset_dm,
+        "Pooled fit vs per-asset fit, common rows": scope,
+    }
+
+
 def write_markdown(run_dir: Path, sections: dict[str, pd.DataFrame], title: str) -> Path:
     """Write a results markdown file from a dict of named tables."""
     lines = [f"# {title}", "", f"Run `{run_dir.name}`.", ""]
@@ -390,35 +417,14 @@ def main() -> None:
         # Indexed by model to match the other tables in the report.
         dm = dm.drop(columns=["vs_baseline"]).set_index("model")
 
-    # Per-asset tables are written by the runner too, and read back for the
-    # same reason as dm.csv: the report must show the numbers the run produced.
-    per_asset = _read_optional(run_dir / "per_asset.csv")
-    if not per_asset.empty:
-        keep = [c for c in ["model", "asset", "n_folds", "n_obs", *CLASSIFICATION_COLUMNS,
-                            "qlike", "mz_beta", "mz_r2", "rmse_log"] if c in per_asset.columns]
-        per_asset = per_asset[keep].set_index(["model", "asset"]).round(4)
-    per_asset_dm = _read_optional(run_dir / "dm_per_asset.csv")
-    per_asset_dm_heading = (
-        f"Diebold-Mariano vs {per_asset_dm['vs_baseline'].iloc[0]}, per asset"
-        if not per_asset_dm.empty
-        else "Diebold-Mariano, per asset"
-    )
-    if not per_asset_dm.empty:
-        per_asset_dm = per_asset_dm.drop(columns=["vs_baseline", "note"], errors="ignore").set_index(
-            ["model", "asset"]
-        )
-    scope = scope_comparison(predictions)
-    if not scope.empty:
-        scope = scope.set_index(["family", "asset"])
+    per_asset_sections = _per_asset_sections(run_dir, predictions)
 
     sections = {
         "Per-fold summary": fold_table(results),
         f"Edge over {args.baseline}, per fold": edge_over_baseline(results, baseline=args.baseline),
         dm_heading: dm,
         "Seed spread": seed_spread(results),
-        "By asset, rows pooled across folds and seeds": per_asset,
-        per_asset_dm_heading: per_asset_dm,
-        "Pooled fit vs per-asset fit, common rows": scope,
+        **per_asset_sections,
     }
     path = write_markdown(run_dir, sections, "Results")
     print(f"wrote {path}")

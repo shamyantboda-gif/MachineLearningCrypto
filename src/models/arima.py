@@ -36,7 +36,6 @@ class ArimaModel(Model):
     """Per-asset ARIMA with order selection by information criterion."""
 
     name = "arima"
-    wants_raw_features = True
 
     def __init__(self, params: dict | None = None, task: str = CLASSIFICATION, seed: int = 42):
         super().__init__(params, task, seed)
