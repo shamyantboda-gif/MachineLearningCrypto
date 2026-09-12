@@ -203,6 +203,83 @@ def per_asset_breakdown(predictions: pd.DataFrame, y_true: pd.Series) -> pd.Data
     )
 
 
+PER_ASSET_SUFFIX = "_per_asset"
+
+
+def scope_comparison(predictions: pd.DataFrame) -> pd.DataFrame:
+    """Pooled fit against per-asset fit of the same family, on common rows only.
+
+    A family run both ways appears as ``ridge`` and ``ridge_per_asset``. The
+    per-asset arm can be missing rows the pooled arm has, because an asset with
+    too little history is skipped rather than fitted on almost nothing, so the
+    two are scored on the intersection of their rows and ``n_obs`` says how
+    large that is. The Diebold-Mariano statistic is per-asset against pooled:
+    negative means the per-asset fit has the lower loss.
+
+    ``predictions`` must carry ``y_true``, which the runner writes next to the
+    forecasts for exactly this purpose.
+    """
+    if predictions.empty or "y_true" not in predictions.columns:
+        return pd.DataFrame()
+
+    from src.evaluate.diebold_mariano import diebold_mariano
+
+    models = set(predictions["model"].unique())
+    pairs = [
+        (name, name + PER_ASSET_SUFFIX)
+        for name in sorted(models)
+        if name + PER_ASSET_SUFFIX in models
+    ]
+    if not pairs:
+        return pd.DataFrame()
+
+    column = "proba" if "proba" in predictions.columns else "pred"
+    metric = "accuracy" if column == "proba" else "rmse"
+    usable = predictions.dropna(subset=[column])
+    # Average a stochastic model over its seeds first, the same way dm_table and
+    # the backtest do, so a comparison is between families and not between
+    # lucky draws.
+    signal = (
+        usable.groupby([schema.ASSET, schema.DATE, "model"], observed=True)[column]
+        .mean()
+        .unstack("model")
+    )
+    truth = predictions["y_true"].groupby(level=[schema.ASSET, schema.DATE]).first()
+    truth = truth.reindex(signal.index)
+    assets = signal.index.get_level_values(schema.ASSET)
+
+    rows = []
+    for pooled, per_asset in pairs:
+        both = truth.notna() & signal[pooled].notna() & signal[per_asset].notna()
+        for asset in [*sorted(assets.unique()), "all"]:
+            mask = both if asset == "all" else both & (assets == asset)
+            if int(mask.sum()) < 2:
+                continue
+            y = truth[mask].to_numpy()
+            a = signal.loc[mask, pooled].to_numpy()
+            b = signal.loc[mask, per_asset].to_numpy()
+            result = diebold_mariano(y, b, a, loss="squared")
+            if metric == "accuracy":
+                score_a = float(np.mean((a >= 0.5) == (y == 1)))
+                score_b = float(np.mean((b >= 0.5) == (y == 1)))
+            else:
+                score_a = float(np.sqrt(np.mean((a - y) ** 2)))
+                score_b = float(np.sqrt(np.mean((b - y) ** 2)))
+            rows.append(
+                {
+                    "family": pooled,
+                    "asset": str(asset),
+                    "n_obs": int(mask.sum()),
+                    f"{metric}_pooled": round(score_a, 4),
+                    f"{metric}_per_asset": round(score_b, 4),
+                    "dm_statistic": result.statistic,
+                    "p_value": result.p_value,
+                    "better": {"a": "per_asset", "b": "pooled"}.get(result.better, result.better),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def plot_accuracy_over_time(
     results: pd.DataFrame,
     baseline: str = "persistence",
@@ -271,6 +348,10 @@ def plot_equity_curves(curves: dict[str, pd.Series], path: Path | None = None) -
     return path
 
 
+def _read_optional(path: Path) -> pd.DataFrame:
+    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+
+
 def write_markdown(run_dir: Path, sections: dict[str, pd.DataFrame], title: str) -> Path:
     """Write a results markdown file from a dict of named tables."""
     lines = [f"# {title}", "", f"Run `{run_dir.name}`.", ""]
@@ -305,11 +386,35 @@ def main() -> None:
         # Indexed by model to match the other tables in the report.
         dm = dm.drop(columns=["vs_baseline"]).set_index("model")
 
+    # Per-asset tables are written by the runner too, and read back for the
+    # same reason as dm.csv: the report must show the numbers the run produced.
+    per_asset = _read_optional(run_dir / "per_asset.csv")
+    if not per_asset.empty:
+        keep = [c for c in ["model", "asset", "n_folds", "n_obs", *CLASSIFICATION_COLUMNS,
+                            "qlike", "mz_beta", "mz_r2", "rmse_log"] if c in per_asset.columns]
+        per_asset = per_asset[keep].set_index(["model", "asset"]).round(4)
+    per_asset_dm = _read_optional(run_dir / "dm_per_asset.csv")
+    per_asset_dm_heading = (
+        f"Diebold-Mariano vs {per_asset_dm['vs_baseline'].iloc[0]}, per asset"
+        if not per_asset_dm.empty
+        else "Diebold-Mariano, per asset"
+    )
+    if not per_asset_dm.empty:
+        per_asset_dm = per_asset_dm.drop(columns=["vs_baseline", "note"], errors="ignore").set_index(
+            ["model", "asset"]
+        )
+    scope = scope_comparison(predictions)
+    if not scope.empty:
+        scope = scope.set_index(["family", "asset"])
+
     sections = {
         "Per-fold summary": fold_table(results),
         f"Edge over {args.baseline}, per fold": edge_over_baseline(results, baseline=args.baseline),
         dm_heading: dm,
         "Seed spread": seed_spread(results),
+        "By asset, rows pooled across folds and seeds": per_asset,
+        per_asset_dm_heading: per_asset_dm,
+        "Pooled fit vs per-asset fit, common rows": scope,
     }
     path = write_markdown(run_dir, sections, "Results")
     print(f"wrote {path}")

@@ -16,7 +16,14 @@ import pytest
 
 from src.config import load_config
 from src.models.base import CLASSIFICATION, REGRESSION
-from src.train import build_models, default_dm_baseline, dm_table
+from src.evaluate.report import scope_comparison
+from src.train import (
+    build_models,
+    default_dm_baseline,
+    dm_per_asset,
+    dm_table,
+    per_asset_results,
+)
 
 # Family name -> the config that selects it and the class it must produce.
 REGISTRY_CASES = {
@@ -119,3 +126,78 @@ def test_default_dm_baseline_matches_the_baselines_each_target_builds(target, ex
     task = CLASSIFICATION if target == "dir_1d" else REGRESSION
     built = {model.name for model in build_baselines(target, params={}, task=task)}
     assert expected in built, f"{expected!r} is not among {sorted(built)} for {target}"
+
+
+def test_per_asset_results_scores_each_asset_and_reconciles_to_the_pooled_row(
+    predictions_and_truth,
+):
+    """One row per model and asset, plus an ``all`` row on the same rows pooled.
+
+    The ``all`` row is what lets a reader check the per-asset numbers against
+    the headline: weighted by row count, the asset accuracies must average to
+    it exactly.
+    """
+    predictions, truth = predictions_and_truth
+
+    table = per_asset_results(predictions, truth, task=CLASSIFICATION, target="dir_1d")
+
+    assert set(table["asset"]) == {"BTC", "ETH", "all"}
+    assert set(table["model"]) == {"sharp", "vague"}
+    assert len(table) == 6
+
+    sharp = table[table["model"] == "sharp"].set_index("asset")
+    by_asset = sharp.drop(index="all")
+    weighted = (by_asset["directional_accuracy"] * by_asset["n_obs"]).sum() / by_asset["n_obs"].sum()
+    assert weighted == pytest.approx(sharp.loc["all", "directional_accuracy"])
+    assert sharp.loc["all", "n_obs"] == len(truth)
+    assert sharp.loc["BTC", "directional_accuracy"] > sharp.loc["BTC", "base_rate"]
+    assert "roc_auc" in table.columns and "brier_score" in table.columns
+
+
+def test_dm_per_asset_runs_the_test_inside_each_asset(predictions_and_truth):
+    predictions, truth = predictions_and_truth
+
+    table = dm_per_asset(predictions, truth, baseline="vague")
+
+    assert set(table["asset"]) == {"BTC", "ETH"}
+    assert list(table["model"].unique()) == ["sharp"]
+    assert (table["n_obs"] == 250).all(), "each asset is tested on its own 250 rows"
+    assert (table["dm_statistic"] < 0).all()
+
+
+def test_scope_comparison_pairs_pooled_and_per_asset_fits_on_common_rows(
+    predictions_and_truth,
+):
+    """``ridge`` and ``ridge_per_asset`` are compared only where both predicted.
+
+    The per-asset arm drops the first 50 rows of ETH, as it would when an asset
+    has too little history to fit on. The comparison must shrink to the rows
+    both arms cover rather than score the two on different samples.
+    """
+    predictions, truth = predictions_and_truth
+    pooled = predictions[predictions["model"] == "sharp"].assign(model="ridge")
+    per_asset = predictions[predictions["model"] == "vague"].assign(model="ridge_per_asset")
+    eth_rows = per_asset.index.get_level_values("asset") == "ETH"
+    drop = per_asset.index[eth_rows][:50]
+    per_asset = per_asset.drop(index=drop)
+    frame = pd.concat([pooled, per_asset])
+    frame["y_true"] = truth.reindex(frame.index)
+
+    table = scope_comparison(frame)
+
+    assert set(table["family"]) == {"ridge"}
+    assert set(table["asset"]) == {"BTC", "ETH", "all"}
+    by_asset = table.set_index("asset")
+    assert by_asset.loc["BTC", "n_obs"] == 250
+    assert by_asset.loc["ETH", "n_obs"] == 200
+    assert by_asset.loc["all", "n_obs"] == 450
+    # sharp (pooled) is the better forecast, so per-asset loses at every level.
+    assert (table["accuracy_pooled"] > table["accuracy_per_asset"]).all()
+    assert (table["dm_statistic"] > 0).all()
+    assert (table["p_value"] < 0.05).all()
+
+
+def test_scope_comparison_is_empty_without_a_per_asset_arm(predictions_and_truth):
+    predictions, truth = predictions_and_truth
+    frame = predictions.assign(y_true=truth.reindex(predictions.index))
+    assert scope_comparison(frame).empty

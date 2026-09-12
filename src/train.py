@@ -116,7 +116,17 @@ def _score(
     prediction: Prediction,
     task: str,
 ) -> dict[str, float]:
-    """Score one fold, routing the volatility target to its own loss functions.
+    """Score one fold on the rows the fold handed the model."""
+    return score_prediction(data.y_test, prediction, task, data.target)
+
+
+def score_prediction(
+    y_true: pd.Series,
+    prediction: Prediction,
+    task: str,
+    target: str,
+) -> dict[str, float]:
+    """Score a prediction, routing the volatility target to its own loss functions.
 
     ``vol_1d`` is registered as a regression target and stored on a log scale,
     but the volatility forecasting literature scores on QLIKE and the
@@ -126,9 +136,12 @@ def _score(
     not what a user of the forecast cares about. Converting at the boundary and
     dispatching on the volatility task is what makes the reported numbers the
     ones the target actually calls for.
+
+    This is the one scoring path, used for a fold, for an asset within a run,
+    and for the pooled row those asset numbers must add back up to.
     """
-    if data.target == "vol_1d":
-        variance_true = pd.Series(np.exp(data.y_test.to_numpy()), index=data.y_test.index)
+    if target == "vol_1d":
+        variance_true = pd.Series(np.exp(y_true.to_numpy()), index=y_true.index)
         variance_pred = Prediction(
             index=prediction.index,
             point=np.exp(prediction.point),
@@ -141,12 +154,12 @@ def _score(
         )
         # Keep the log scale errors alongside, since they are what the models
         # were fitted to and they make the folds comparable across assets.
-        log_row = metric_lib.evaluate_predictions(data.y_test, prediction, task)
+        log_row = metric_lib.evaluate_predictions(y_true, prediction, task)
         row["rmse_log"] = log_row.get("rmse", float("nan"))
         row["mae_log"] = log_row.get("mae", float("nan"))
         return row
 
-    return metric_lib.evaluate_predictions(data.y_test, prediction, task)
+    return metric_lib.evaluate_predictions(y_true, prediction, task)
 
 
 def default_dm_baseline(target: str) -> str:
@@ -264,40 +277,107 @@ def run(
     # The test that separates "looks better" from "is better". It is computed
     # here rather than left to the reader so that every p-value quoted about
     # this project has a file behind it.
-    dm = dm_table(predictions, y, baseline=dm_baseline or default_dm_baseline(target))
+    baseline = dm_baseline or default_dm_baseline(target)
+    dm = dm_table(predictions, y, baseline=baseline)
     if not quiet and not dm.empty:
-        print(f"\nDiebold-Mariano vs {dm['vs_baseline'].iloc[0]}")
+        print(f"\nDiebold-Mariano vs {baseline}")
         print(dm[["model", "dm_statistic", "p_value", "better"]].to_string(index=False))
 
-    _persist(config, model_configs, results, predictions, importances, dm, matrix, quiet)
+    # The same predictions, split by asset. A pooled number can hide skill
+    # that lives on one asset, or hide one asset dragging the others down.
+    per_asset = per_asset_results(predictions, y, task, target)
+    per_asset_dm = dm_per_asset(predictions, y, baseline=baseline)
+
+    # The truth travels with the predictions so a report can be rebuilt from
+    # the run directory alone, without recomputing the feature matrix.
+    if not predictions.empty:
+        predictions["y_true"] = y.reindex(predictions.index).to_numpy()
+
+    _persist(
+        config,
+        model_configs,
+        results,
+        predictions,
+        importances,
+        dm,
+        per_asset,
+        per_asset_dm,
+        matrix,
+        quiet,
+    )
     return results, predictions
 
 
 def per_asset_results(
-    predictions: pd.DataFrame, y: pd.Series, task: str
+    predictions: pd.DataFrame, y: pd.Series, task: str, target: str
 ) -> pd.DataFrame:
-    """Break the same predictions down by asset.
+    """Break the same predictions down by asset, with a pooled ``all`` row.
 
-    Skill may exist on the least efficient asset and nowhere else, which would
-    be a real and explicable finding rather than noise. Pooling across assets
-    would hide it.
+    Skill may exist on one asset and nowhere else, which would be a real and
+    explicable finding rather than noise. Pooling across assets would hide it.
+
+    Rows are scored pooled across folds and, for a stochastic model, across
+    seeds, so every seed's forecast counts as a row. The ``all`` row scores the
+    same rows without the asset split, so the asset numbers, weighted by their
+    row counts, average back to it exactly and a reader can reconcile the
+    breakdown against the headline.
     """
+    if predictions.empty:
+        return pd.DataFrame()
+
+    assets = predictions.index.get_level_values(schema.ASSET)
     rows = []
-    for (model, asset), group in predictions.groupby(
-        ["model", predictions.index.get_level_values(schema.ASSET)], observed=True
-    ):
-        truth = y.reindex(group.index)
-        proba = group["proba"].to_numpy() if "proba" in group else None
-        prediction = Prediction(
-            index=group.index,
-            point=group["pred"].to_numpy(),
-            proba=proba,
-            model_name=str(model),
-        )
-        row = metric_lib.evaluate_predictions(truth, prediction, task)
-        row.update({"model": model, "asset": asset})
-        rows.append(row)
-    return pd.DataFrame(rows)
+    for (model, asset), group in predictions.groupby(["model", assets], observed=True):
+        rows.append(_score_group(group, y, task, target, model=str(model), asset=str(asset)))
+    for model, group in predictions.groupby("model", observed=True):
+        rows.append(_score_group(group, y, task, target, model=str(model), asset="all"))
+    table = pd.DataFrame(rows)
+    front = ["model", "asset", "n_folds"]
+    return table[front + [c for c in table.columns if c not in front]]
+
+
+def _score_group(
+    group: pd.DataFrame, y: pd.Series, task: str, target: str, model: str, asset: str
+) -> dict:
+    truth = y.reindex(group.index)
+    proba = group["proba"].to_numpy() if "proba" in group else None
+    prediction = Prediction(
+        index=group.index,
+        point=group["pred"].to_numpy(),
+        proba=proba,
+        model_name=model,
+    )
+    row = score_prediction(truth, prediction, task, target)
+    row.update(
+        {"model": model, "asset": asset, "n_folds": int(group["fold"].nunique()) if "fold" in group else 0}
+    )
+    return row
+
+
+def dm_per_asset(
+    predictions: pd.DataFrame,
+    y: pd.Series,
+    baseline: str = "persistence",
+    loss: str = "squared",
+) -> pd.DataFrame:
+    """The Diebold-Mariano test run separately inside each asset's rows.
+
+    A model can lose to the baseline pooled and still beat it on one asset, or
+    the reverse. This is the table that says which, with the sample size of
+    each test next to its p-value so the reader can see how much it can detect.
+    """
+    if predictions.empty:
+        return pd.DataFrame()
+
+    assets = predictions.index.get_level_values(schema.ASSET)
+    tables = []
+    for asset in sorted(assets.unique()):
+        subset = predictions[assets == asset]
+        table = dm_table(subset, y, baseline=baseline, loss=loss)
+        if not table.empty:
+            table.insert(1, "asset", str(asset))
+            tables.append(table)
+    return pd.concat(tables, ignore_index=True) if tables else pd.DataFrame()
 
 
 def dm_table(
@@ -360,6 +440,8 @@ def _persist(
     predictions: pd.DataFrame,
     importances: pd.DataFrame,
     dm: pd.DataFrame,
+    per_asset: pd.DataFrame,
+    per_asset_dm: pd.DataFrame,
     matrix,
     quiet: bool,
 ) -> None:
@@ -375,6 +457,10 @@ def _persist(
         importances.to_csv(out_dir / "feature_importance.csv", index=False)
     if not dm.empty:
         dm.to_csv(out_dir / "dm.csv", index=False)
+    if not per_asset.empty:
+        per_asset.to_csv(out_dir / "per_asset.csv", index=False)
+    if not per_asset_dm.empty:
+        per_asset_dm.to_csv(out_dir / "dm_per_asset.csv", index=False)
 
     (out_dir / "config.json").write_text(json.dumps(merged, indent=2, default=str), encoding="utf-8")
     (out_dir / "features.txt").write_text("\n".join(matrix.feature_names), encoding="utf-8")
