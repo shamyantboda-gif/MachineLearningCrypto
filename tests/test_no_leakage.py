@@ -952,9 +952,8 @@ def test_real_panel_features_do_not_change_when_later_data_is_removed(
 ):
     """The end-to-end causality test on the real panel.
 
-    Truncated part way through 2022, which is inside the SOL history as well as
-    the three older assets, so the cross-asset family is exercised with a full
-    complement of assets on both sides of the comparison.
+    Truncated part way through the history, so the cross-asset family is
+    exercised with a full complement of assets on both sides of the comparison.
     """
     unique_dates = pd.DatetimeIndex(
         sorted(pd.DatetimeIndex(real_panel.index.get_level_values(schema.DATE)).unique())

@@ -12,7 +12,6 @@ data:
     BTCUSDT: BTC
     ETHUSDT: ETH
     LTCUSDT: LTC
-    SOLUSDT: SOL
   # Archive months to attempt. The fetcher stops at the first missing tail month
   # and skips leading months before a symbol was listed.
   start_month: "2017-08"

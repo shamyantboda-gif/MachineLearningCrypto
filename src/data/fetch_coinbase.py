@@ -74,7 +74,7 @@ OUTPUT_COLUMNS = [
     schema.VOLUME,
 ]
 
-DEFAULT_PRODUCTS = ["BTC-USD", "ETH-USD", "LTC-USD", "SOL-USD"]
+DEFAULT_PRODUCTS = ["BTC-USD", "ETH-USD", "LTC-USD"]
 
 _HEADERS = {"User-Agent": "crypto-price-prediction-research/1.0"}
 
@@ -153,8 +153,8 @@ def _paginate(
 
     Both ``start`` and ``end`` are inclusive on this endpoint, so windows step
     by 300 days and begin the day after the previous one ended. Ranges that
-    predate a product's listing return an empty list rather than an error,
-    which is why SOL-USD asked for 2017 is not a failure.
+    predate a product's listing return an empty list rather than an error, so
+    asking for months before a listing is not a failure.
     """
     rows: list[list[Any]] = []
     cursor = start
