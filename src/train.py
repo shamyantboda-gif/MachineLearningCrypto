@@ -42,13 +42,59 @@ from src.preprocess import FoldPreprocessor
 from src.splits.walk_forward import splitter_from_config
 
 
+def load_model_config(path: str | Path) -> dict:
+    """Load a model config, resolving ``model.extends`` against a sibling file.
+
+    A per-asset config names the pooled config it inherits from and adds only
+    ``fit_scope``, so the two arms cannot drift apart in a hyper-parameter. The
+    resolved dictionary is what gets hashed, so the run directory still names
+    the parameters that were actually used.
+    """
+    path = Path(path)
+    config = load_config(path)
+    parent = config.get("model", {}).get("extends")
+    if parent is None:
+        return config
+    base = load_model_config(path.parent / parent)
+    merged = dict(base["model"])
+    merged.update({k: v for k, v in config["model"].items() if k != "extends"})
+    return {**base, **config, "model": merged}
+
+
 def build_models(model_config: dict, task: str, seed: int) -> list[Model]:
-    """Instantiate the model family named by a model config file."""
+    """Instantiate the model family named by a model config file.
+
+    ``fit_scope: per_asset`` wraps whatever the family would have been in a
+    ``PerAssetModel`` that fits one copy per asset. The wrapper is built from a
+    factory rather than an instance so a stochastic family can be rebuilt per
+    seed the same way the pooled one is.
+    """
     family = model_config["model"]["family"]
     params = model_config["model"]
 
     if family == "baselines":
         return []  # baselines are always added separately
+
+    scope = params.get("fit_scope", "pooled")
+    if scope == "per_asset":
+        from src.models.per_asset import PerAssetModel
+
+        inner = {
+            **model_config,
+            "model": {k: v for k, v in params.items() if k not in {"fit_scope", "min_train_rows"}},
+        }
+        pooled = build_models(inner, task, seed)
+        return [
+            PerAssetModel(
+                build=lambda i=i: build_models(inner, task, seed)[i],
+                min_train_rows=int(params.get("min_train_rows", 500)),
+                task=task,
+                seed=seed,
+            )
+            for i in range(len(pooled))
+        ]
+    if scope != "pooled":
+        raise ValueError(f"unknown fit_scope {scope!r}, expected 'pooled' or 'per_asset'")
 
     if family == "arima":
         from src.models.arima import ArimaModel
@@ -512,7 +558,7 @@ def main() -> None:
     if args.scheme:
         config["splits"]["scheme"] = args.scheme
 
-    model_configs = [load_config(path) for path in args.model]
+    model_configs = [load_model_config(path) for path in args.model]
     results, predictions = run(
         config,
         model_configs,

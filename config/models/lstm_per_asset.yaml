@@ -1,0 +1,6 @@
+# The lstm family fitted once per asset instead of once across the panel.
+# Everything except the scope is inherited from lstm.yaml.
+model:
+  extends: lstm.yaml
+  fit_scope: per_asset
+  min_train_rows: 500

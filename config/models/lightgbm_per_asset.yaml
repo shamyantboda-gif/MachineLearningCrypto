@@ -1,0 +1,6 @@
+# LightGBM fitted once per asset instead of once across the panel.
+# Everything except the scope is inherited from lightgbm.yaml.
+model:
+  extends: lightgbm.yaml
+  fit_scope: per_asset
+  min_train_rows: 500

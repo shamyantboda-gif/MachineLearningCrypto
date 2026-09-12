@@ -1,0 +1,6 @@
+# The dlinear family fitted once per asset instead of once across the panel.
+# Everything except the scope is inherited from dlinear.yaml.
+model:
+  extends: dlinear.yaml
+  fit_scope: per_asset
+  min_train_rows: 500
