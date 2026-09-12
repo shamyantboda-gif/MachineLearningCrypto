@@ -6,7 +6,7 @@ CONFIG ?= config/base.yaml
 # because the default is the newest directory by modification time, which
 # reorders whenever a report or a backtest is written. Override on the command
 # line to point report and backtest at a different run.
-RUN ?= reports/results/a08f75962a
+RUN ?= reports/results/6246329f52
 
 help:
 	@echo "make setup     install pinned dependencies"

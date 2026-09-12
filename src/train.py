@@ -543,7 +543,13 @@ def _persist(
                 "run_id": run_id,
                 "timestamp": pd.Timestamp.utcnow().isoformat(),
                 "target": config["targets"]["primary"],
-                "models": ",".join(sorted({m["model"]["family"] for m in model_configs})),
+                "models": ",".join(
+                    sorted(
+                        m["model"]["family"]
+                        + ("_per_asset" if m["model"].get("fit_scope") == "per_asset" else "")
+                        for m in model_configs
+                    )
+                ),
                 "n_rows": len(results),
             }
         ]

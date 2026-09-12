@@ -162,9 +162,15 @@ def base_rate(y_true: np.ndarray, proba: np.ndarray | None = None) -> float:
     classification metrics so a degenerate fold reads as degenerate across the
     whole row rather than showing a lone 1.0 that looks like a score.
     """
-    y = np.asarray(y_true, dtype=float).ravel()
-    y = y[np.isfinite(y)]
-    labels = (y > 0).astype(int)
+    if proba is not None:
+        # Restrict to the rows the model actually scored, so the base rate a
+        # reader compares accuracy against is over the same days. A model that
+        # skipped an asset must not be read against that asset's up-days.
+        labels, _ = _clean_classification(y_true, proba)
+    else:
+        y = np.asarray(y_true, dtype=float).ravel()
+        y = y[np.isfinite(y)]
+        labels = (y > 0).astype(int)
     if not _scoreable(labels):
         return NAN
     return float(np.mean(labels))
@@ -419,7 +425,7 @@ def evaluate_predictions(
         row = {
             "n_obs": float(np.sum(np.isfinite(y) & np.isfinite(score))),
             "directional_accuracy": directional_accuracy(y, score),
-            "base_rate": base_rate(y),
+            "base_rate": base_rate(y, score),
             "balanced_accuracy": balanced_accuracy(y, score),
             "matthews_corrcoef": matthews_corrcoef(y, score),
         }

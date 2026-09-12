@@ -250,6 +250,10 @@ def scope_comparison(predictions: pd.DataFrame) -> pd.DataFrame:
 
     rows = []
     for pooled, per_asset in pairs:
+        if pooled not in signal.columns or per_asset not in signal.columns:
+            # An arm that never produced a forecast has no column after the
+            # NaN rows are dropped. There is nothing to compare it against.
+            continue
         both = truth.notna() & signal[pooled].notna() & signal[per_asset].notna()
         for asset in [*sorted(assets.unique()), "all"]:
             mask = both if asset == "all" else both & (assets == asset)

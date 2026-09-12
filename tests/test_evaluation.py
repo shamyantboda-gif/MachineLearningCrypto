@@ -242,3 +242,31 @@ def test_dm_table_under_qlike_scores_variances_not_log_variances():
     assert row["loss"] == "qlike"
     assert row["dm_statistic"] < 0 and row["better"] == "a"
     assert np.isfinite(row["p_value"])
+
+
+def test_base_rate_is_computed_on_the_rows_the_model_scored():
+    """A skipped asset's up-days must not enter the base rate its model is read against."""
+    from src.evaluate import metrics
+    from src.models.base import Prediction
+
+    index = pd.MultiIndex.from_product(
+        [["BTC", "ETH"], pd.date_range("2022-01-01", periods=4, freq="D", tz="UTC")],
+        names=["asset", "date"],
+    )
+    # BTC: one up-day in four. ETH: all up-days, and no forecasts.
+    truth = pd.Series([1, 0, 0, 0, 1, 1, 1, 1], index=index, dtype=float)
+    proba = np.array([0.6, 0.4, 0.4, 0.6, np.nan, np.nan, np.nan, np.nan])
+    row = metrics.evaluate_predictions(
+        truth, Prediction(index=index, point=(proba >= 0.5).astype(float), proba=proba), CLASSIFICATION
+    )
+    assert row["n_obs"] == 4
+    assert row["base_rate"] == pytest.approx(0.25), "base rate leaked ETH's unscored up-days"
+
+
+def test_scope_comparison_skips_an_arm_that_never_predicted(predictions_and_truth):
+    predictions, truth = predictions_and_truth
+    pooled = predictions[predictions["model"] == "sharp"].assign(model="ridge")
+    empty_arm = pooled.assign(model="ridge_per_asset", pred=np.nan, proba=np.nan)
+    frame = pd.concat([pooled, empty_arm])
+    frame["y_true"] = truth.reindex(frame.index)
+    assert scope_comparison(frame).empty
