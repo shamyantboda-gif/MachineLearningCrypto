@@ -55,13 +55,11 @@ def positions_for(predictions: pd.DataFrame, model: str, config: dict) -> pd.Ser
     signal = seed_averaged(subset, signal_column)[model].reindex(dates)
 
     backtest_cfg = config["backtest"]
-    _, periods_per_year = _backtest_settings(config)
     return signal_to_position(
         signal,
         rule=backtest_cfg.get("rule", "long_short"),
         threshold=backtest_cfg.get("threshold", 0.5),
         band=backtest_cfg.get("band", 0.02),
-        periods_per_year=periods_per_year,
     )
 
 

@@ -335,22 +335,6 @@ class GarchModel(Model):
 
         return out.fillna(np.log(1e-4)).to_numpy(dtype=float)
 
-    def conditional_volatility(self, X: pd.DataFrame, meta: pd.DataFrame | None) -> pd.Series:
-        """Forecast standard deviation per period, for volatility-scaled sizing.
-
-        The backtest wants a standard deviation of returns, not a log variance,
-        so this converts once in a single place rather than at every call site.
-        """
-        log_variance = self.predict(X, meta)
-        return pd.Series(np.sqrt(np.exp(log_variance)), index=X.index)
-
-    def fitted_parameters(self) -> pd.DataFrame:
-        """Estimated parameters per asset, for the report."""
-        if not self.fitted_params_:
-            return pd.DataFrame()
-        return pd.DataFrame(self.fitted_params_).T
-
-
 def build_garch_models(config: dict, task: str = REGRESSION) -> list[GarchModel]:
     """Instantiate each configured GARCH variant."""
     model_cfg = config.get("model", {})

@@ -31,7 +31,6 @@ class LightGBMModel(Model):
         super().__init__(params, task, seed)
         self.model_params = dict(self.params.get("params", {}))
         self.early_stopping_rounds = int(self.params.get("early_stopping_rounds", 100))
-        self.want_shap = bool(self.params.get("shap", False))
 
         self.booster_ = None
         self.feature_names_: list[str] = []
@@ -101,38 +100,3 @@ class LightGBMModel(Model):
         booster = self.booster_.booster_
         gains = booster.feature_importance(importance_type="gain")
         return pd.Series(gains, index=self.feature_names_).sort_values(ascending=False)
-
-    def shap_values(self, X: pd.DataFrame, max_rows: int = 2000) -> pd.DataFrame | None:
-        """Mean absolute SHAP value per feature on a sample of ``X``.
-
-        Instability of the importance ranking across folds is itself a finding
-        worth reporting, so this is computed per fold rather than once.
-        """
-        if self.booster_ is None or not self.want_shap:
-            return None
-        try:
-            import shap
-        except ImportError:
-            return None
-
-        sample = X[self.feature_names_]
-        if len(sample) > max_rows:
-            sample = sample.sample(max_rows, random_state=self.seed)
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            explainer = shap.TreeExplainer(self.booster_.booster_)
-            values = explainer.shap_values(sample)
-
-        if isinstance(values, list):
-            values = values[-1]
-        values = np.asarray(values)
-        if values.ndim == 3:
-            values = values[:, :, -1]
-
-        return pd.DataFrame(
-            {
-                "feature": self.feature_names_,
-                "mean_abs_shap": np.abs(values).mean(axis=0),
-            }
-        ).sort_values("mean_abs_shap", ascending=False)

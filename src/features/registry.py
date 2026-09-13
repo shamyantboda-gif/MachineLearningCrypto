@@ -18,7 +18,6 @@ from dataclasses import dataclass
 import pandas as pd
 
 from src import schema
-from src.config import PROCESSED_DIR, config_hash
 from src.data.targets import build_targets
 from src.features import auxiliary as auxiliary_family
 from src.features import calendar_feats, cross_asset, price, range_vol, technical, volume
@@ -169,13 +168,3 @@ def _drop_warmup(
     keep = keep & targets[primary].notna()
 
     return X.loc[keep], targets.loc[keep], meta.loc[keep]
-
-
-def features_path(config: dict) -> str:
-    """Cache path for a feature matrix, named by the hash of the settings that made it."""
-    relevant = {
-        "features": config["features"],
-        "data": {k: config["data"][k] for k in ("symbols", "interval", "start_month", "end_month")},
-        "targets": config["targets"],
-    }
-    return str(PROCESSED_DIR / f"features_{config_hash(relevant)}.parquet")

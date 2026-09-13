@@ -226,50 +226,6 @@ def brier_score(y_true: np.ndarray, proba: np.ndarray) -> float:
     return float(_sk_brier(labels, s))
 
 
-CALIBRATION_COLUMNS = ["bin_mid", "mean_pred", "frac_positive", "count"]
-
-
-def calibration_curve_data(
-    y_true: np.ndarray, proba: np.ndarray, n_bins: int = 10
-) -> pd.DataFrame:
-    """Reliability table for P(up), one row per non empty probability bin.
-
-    Bins are equal width over [0, 1]. Empty bins are dropped rather than
-    emitted with a nan mean, so the row ``count`` column is always positive and
-    a caller can weight by it without filtering first.
-
-    Being the one function here that returns a table, the degenerate answer is
-    an empty frame carrying the declared columns rather than a scalar nan. An
-    empty or single class fold therefore yields ``len(result) == 0``.
-    """
-    labels, s = _clean_classification(y_true, proba)
-    if not _scoreable(labels):
-        return pd.DataFrame({c: pd.Series(dtype="float64") for c in CALIBRATION_COLUMNS})
-
-    edges = np.linspace(0.0, 1.0, n_bins + 1)
-    # Clip so probabilities sitting exactly on 0 or 1 land in the end bins
-    # instead of falling outside the range.
-    idx = np.clip(np.digitize(s, edges[1:-1], right=False), 0, n_bins - 1)
-
-    rows = []
-    for b in range(n_bins):
-        in_bin = idx == b
-        count = int(in_bin.sum())
-        if count == 0:
-            continue
-        rows.append(
-            {
-                "bin_mid": float((edges[b] + edges[b + 1]) / 2.0),
-                "mean_pred": float(np.mean(s[in_bin])),
-                "frac_positive": float(np.mean(labels[in_bin])),
-                "count": count,
-            }
-        )
-    if not rows:
-        return pd.DataFrame({c: pd.Series(dtype="float64") for c in CALIBRATION_COLUMNS})
-    return pd.DataFrame(rows, columns=CALIBRATION_COLUMNS)
-
-
 # ---------------------------------------------------------------------------
 # Volatility
 # ---------------------------------------------------------------------------

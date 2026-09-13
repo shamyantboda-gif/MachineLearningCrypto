@@ -177,7 +177,7 @@ QLIKE is the headline metric, and the Diebold-Mariano test runs under QLIKE on v
 
 ## Backtest: long-short, 2% dead zone
 
-The rule is per asset, on the predicted probability of an up move: long at `p > 0.52`, short at `p < 0.48`, flat in between. Positions are unit sized, then equal weighted across whichever assets hold one that day, so each date's weights sum to one in absolute terms. Turnover is charged per asset as the change in position, starting from a flat book. Volatility targeting exists in the engine but is off for these results. Binance spot taker fees are around 10 bps one way, so the 20 bps row is the realistic one.
+The rule is per asset, on the predicted probability of an up move: long at `p > 0.52`, short at `p < 0.48`, flat in between. Positions are unit sized, then equal weighted across whichever assets hold one that day, so each date's weights sum to one in absolute terms. Turnover is charged per asset as the change in position, starting from a flat book. Binance spot taker fees are around 10 bps one way, so the 20 bps row is the realistic one.
 
 | signal | cost (bps round trip) | annual return | Sharpe | max drawdown | annual turnover |
 |---|---|---|---|---|---|

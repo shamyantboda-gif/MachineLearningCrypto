@@ -73,7 +73,7 @@ class PersistenceBaseline(Model):
     def predict_proba(self, X: pd.DataFrame, meta: pd.DataFrame | None = None) -> np.ndarray:
         """A graded probability rather than a hard 0 or 1.
 
-        A hard label makes ROC-AUC and the calibration curve meaningless, and
+        A hard label makes ROC-AUC and the Brier score meaningless, and
         it also makes the baseline harder to compare against a model that does
         emit probabilities. Mapping the forecast through a normal CDF scaled by
         the training return standard deviation keeps the ranking identical while

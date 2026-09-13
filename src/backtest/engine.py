@@ -125,10 +125,6 @@ def signal_to_position(
     rule: str = "long_short",
     threshold: float = 0.5,
     band: float = 0.02,
-    vol_forecast: pd.Series | None = None,
-    annual_target: float | None = None,
-    max_leverage: float = 1.0,
-    periods_per_year: int = PERIODS_PER_YEAR,
 ) -> pd.Series:
     """Map a probability of an up move to a target position.
 
@@ -144,17 +140,6 @@ def signal_to_position(
         ``long_short`` goes +1 above ``0.5 + band``, -1 below ``0.5 - band``,
         and flat inside the band. The dead zone exists so that a model hovering
         around a coin flip does not churn the book.
-    vol_forecast:
-        Per period standard deviation of simple returns, on the same scale as
-        the returns the backtest will use. A daily panel means a daily standard
-        deviation, so 0.03 is a 3 percent daily move, not 3 percent annualised.
-        Supply it together with ``annual_target`` to size positions inversely
-        to forecast risk.
-    annual_target:
-        Target annualised volatility of the position, for example 0.40 for 40
-        percent. Ignored unless ``vol_forecast`` is also given.
-    max_leverage:
-        Cap on the absolute position size after scaling.
 
     Returns
     -------
@@ -178,24 +163,7 @@ def signal_to_position(
     # and stay flat, rather than letting NaN comparisons quietly produce 0.
     raw = raw.where(proba.notna(), 0.0)
 
-    if vol_forecast is None or annual_target is None:
-        position = raw
-    else:
-        vol = _check_panel_series(vol_forecast, "vol_forecast").reindex(proba.index)
-        # Annualise the per period standard deviation before comparing it to an
-        # annual target, otherwise the scale factor is off by sqrt(365).
-        annual_vol = vol * np.sqrt(float(periods_per_year))
-        with np.errstate(divide="ignore", invalid="ignore"):
-            scale = float(annual_target) / annual_vol
-        # A zero, negative, missing or infinite volatility forecast carries no
-        # sizing information. Sizing off it would either divide by zero or take
-        # unbounded leverage on the asset the model understands least, so those
-        # rows go flat.
-        scale = scale.where(np.isfinite(scale) & (annual_vol > 0.0), 0.0)
-        sized = raw * scale
-        position = np.sign(sized) * sized.abs().clip(lower=0.0, upper=float(max_leverage))
-
-    position = position.astype("float64")
+    position = raw.astype("float64")
     position.name = "position"
     return position.sort_index()
 

@@ -1,9 +1,9 @@
 """Diebold-Mariano test for equal predictive accuracy of two forecasts.
 
 The test asks whether two forecasts of the same realised series differ in
-expected loss. It does not ask whether either forecast is any good. Pairing it
-with the baseline comparison in :func:`dm_vs_baseline` is what turns "model A
-has a lower RMSE this fold" into a claim with a p-value attached.
+expected loss. It does not ask whether either forecast is any good. Pairing a
+model with a baseline is what turns "model A has a lower RMSE this fold" into
+a claim with a p-value attached.
 
 Sign convention, stated once and repeated on every public function because it
 is the thing readers get backwards: the loss differential is
@@ -245,22 +245,3 @@ def diebold_mariano(
         better=better,
         note=drop_note.strip(),
     )
-
-
-def dm_vs_baseline(
-    y_true: np.ndarray,
-    pred_model: np.ndarray,
-    pred_baseline: np.ndarray,
-    **kwargs,
-) -> DMResult:
-    """Compare a model against a baseline, with the model in the A slot.
-
-    A negative statistic with a small p-value means the model genuinely beats
-    the baseline: lower loss, and a gap large enough that it is unlikely to be
-    sampling noise. A positive statistic with a small p-value means the
-    baseline wins. A large p-value in either direction means this fold cannot
-    tell the two apart, which on daily crypto direction is the expected result.
-
-    Keyword arguments pass straight through to :func:`diebold_mariano`.
-    """
-    return diebold_mariano(y_true, pred_model, pred_baseline, **kwargs)

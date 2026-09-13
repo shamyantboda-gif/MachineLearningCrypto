@@ -156,20 +156,13 @@ class ArimaModel(Model):
         Under the model's own assumption of normal errors with standard
         deviation sigma, P(return > 0) is the normal CDF of the forecast
         divided by sigma. That is a real probability rather than a hard label,
-        which is what the calibration curve and the backtest both need.
+        which is what the Brier score and the backtest both need.
         """
         forecasts = self._point_forecasts(X, meta)
         assets = X.index.get_level_values(schema.ASSET)
         sigma = np.array([self.sigma_.get(a, 1e-2) for a in assets], dtype=float)
         sigma = np.where(sigma > 0, sigma, 1e-6)
         return norm.cdf(forecasts.to_numpy() / sigma)
-
-    def selected_orders(self) -> pd.DataFrame:
-        """Order chosen per asset, reported because (0,0,0) is itself a finding."""
-        return pd.DataFrame(
-            [{"asset": a, "order": str(o)} for a, o in sorted(self.orders_.items())]
-        )
-
 
 def _returns_by_asset(meta: pd.DataFrame) -> dict[str, pd.Series]:
     """Split the lagged return column into one clean series per asset.

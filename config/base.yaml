@@ -70,10 +70,6 @@ backtest:
   rule: long_short        # long_only | long_short
   band: 0.02              # dead zone around 0.5 for long_short
   threshold: 0.5          # entry level for long_only
-  vol_target:
-    enabled: false
-    annual_target: 0.40
-    max_leverage: 1.0
   cost_bps_round_trip: [0.0, 5.0, 20.0]
   periods_per_year: 365
 

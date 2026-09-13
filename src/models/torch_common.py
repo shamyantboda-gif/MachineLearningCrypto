@@ -37,10 +37,6 @@ from torch.utils.data import DataLoader, Dataset
 from src.models.base import CLASSIFICATION, REGRESSION, FoldData, Model
 from src.schema import ASSET, DATE
 
-# Label used for the extra embedding row that catches assets never seen during
-# fit. Keeping a dedicated slot is cheaper than crashing on an unseen asset.
-UNKNOWN_ASSET = "<unknown>"
-
 
 def set_torch_seed(seed: int) -> None:
     """Seed every generator that can change a fit's output.
@@ -528,14 +524,10 @@ def build_torch_model(family: str, params: dict, task: str, seed: int) -> Model:
     return registry[key](params=params, task=task, seed=seed)
 
 
-TORCH_FAMILIES = ("lstm", "cnn", "dlinear")
-
 __all__ = [
     "ASSET",
     "CLASSIFICATION",
     "REGRESSION",
-    "TORCH_FAMILIES",
-    "UNKNOWN_ASSET",
     "AssetCodec",
     "BaseTorchModel",
     "SequenceDataset",

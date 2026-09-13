@@ -85,25 +85,3 @@ def build_targets(panel: pd.DataFrame) -> pd.DataFrame:
 
     return out
 
-
-def target_column(name: str) -> str:
-    """Validate a target name coming from config."""
-    if name not in TARGET_NAMES:
-        raise ValueError(f"unknown target {name!r}, expected one of {TARGET_NAMES}")
-    return name
-
-
-def describe_class_balance(targets: pd.DataFrame) -> pd.DataFrame:
-    """Base rate of the direction target per asset.
-
-    Reported per fold as well. If a classifier's accuracy equals the base rate
-    it has learned to always predict up, which is not a forecast.
-    """
-    frame = targets[[DIR]].dropna()
-    grouped = frame.groupby(level=schema.ASSET, observed=True)[DIR]
-    return pd.DataFrame(
-        {
-            "n": grouped.size(),
-            "base_rate_up": grouped.mean(),
-        }
-    )

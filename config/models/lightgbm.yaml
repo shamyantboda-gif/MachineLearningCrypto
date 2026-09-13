@@ -13,4 +13,3 @@ model:
     reg_alpha: 0.5
     verbosity: -1
   early_stopping_rounds: 100
-  shap: true
