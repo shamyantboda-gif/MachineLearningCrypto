@@ -15,7 +15,6 @@ import pandas as pd
 import pytest
 
 from src.config import load_config
-from src.models.base import CLASSIFICATION, REGRESSION
 from src.evaluate.report import scope_comparison
 from src.evaluate.tables import (
     default_dm_baseline,
@@ -24,6 +23,7 @@ from src.evaluate.tables import (
     dm_table,
     per_asset_results,
 )
+from src.models.base import CLASSIFICATION, REGRESSION
 from src.train import build_models
 
 # Family name -> the config that selects it and the class it must produce.

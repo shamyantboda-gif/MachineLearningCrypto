@@ -30,7 +30,7 @@ class ZeroBaseline(Model):
 
     name = "zero"
 
-    def fit(self, fold: FoldData) -> "ZeroBaseline":
+    def fit(self, fold: FoldData) -> ZeroBaseline:
         self.fitted_ = True
         return self
 
@@ -57,7 +57,7 @@ class PersistenceBaseline(Model):
         super().__init__(params, task, seed)
         self.sigma_ = 1e-2
 
-    def fit(self, fold: FoldData) -> "PersistenceBaseline":
+    def fit(self, fold: FoldData) -> PersistenceBaseline:
         if RET_LAG1 in fold.meta_train.columns:
             spread = float(fold.meta_train[RET_LAG1].std(skipna=True))
             self.sigma_ = spread if spread > 0 else 1e-2
@@ -98,7 +98,7 @@ class HistoricalMeanBaseline(Model):
         self.train_mean_ = 0.0
         self.sigma_ = 1e-2
 
-    def fit(self, fold: FoldData) -> "HistoricalMeanBaseline":
+    def fit(self, fold: FoldData) -> HistoricalMeanBaseline:
         # The training mean is the fallback for test rows whose own trailing
         # window is unavailable. It is computed on train only.
         if RET_LAG1 in fold.meta_train.columns:
@@ -146,7 +146,7 @@ class MajorityClassBaseline(Model):
         self.majority_ = 1.0
         self.base_rate_ = 0.5
 
-    def fit(self, fold: FoldData) -> "MajorityClassBaseline":
+    def fit(self, fold: FoldData) -> MajorityClassBaseline:
         y = fold.y_train.dropna()
         self.base_rate_ = float(y.mean()) if len(y) else 0.5
         self.majority_ = 1.0 if self.base_rate_ >= 0.5 else 0.0
@@ -176,7 +176,7 @@ class VolatilityPersistenceBaseline(Model):
         super().__init__(params, task, seed)
         self.train_median_ = 0.0
 
-    def fit(self, fold: FoldData) -> "VolatilityPersistenceBaseline":
+    def fit(self, fold: FoldData) -> VolatilityPersistenceBaseline:
         if REALISED_VAR_NOW in fold.meta_train.columns:
             values = np.log(fold.meta_train[REALISED_VAR_NOW].replace(0.0, np.nan).dropna())
             self.train_median_ = float(values.median()) if len(values) else 0.0
@@ -205,7 +205,7 @@ class VolatilityClimatologyBaseline(Model):
         self.window = int(self.params.get("historical_mean_window", 63))
         self.train_mean_ = 0.0
 
-    def fit(self, fold: FoldData) -> "VolatilityClimatologyBaseline":
+    def fit(self, fold: FoldData) -> VolatilityClimatologyBaseline:
         if REALISED_VAR_NOW in fold.meta_train.columns:
             values = np.log(fold.meta_train[REALISED_VAR_NOW].replace(0.0, np.nan).dropna())
             self.train_mean_ = float(values.mean()) if len(values) else 0.0

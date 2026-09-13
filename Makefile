@@ -1,4 +1,4 @@
-.PHONY: help setup data features train backtest report test clean
+.PHONY: help setup data test lint train vol deep rolling backtest report all clean
 
 PY ?= python
 CONFIG ?= config/base.yaml
@@ -9,25 +9,29 @@ CONFIG ?= config/base.yaml
 RUN ?= reports/results/6246329f52
 
 help:
-	@echo "make setup     install pinned dependencies"
+	@echo "make setup     install pinned dependencies (plus ruff for make lint)"
 	@echo "make data      download the archive, build and validate the panel"
 	@echo "make test      run the leakage, alignment and causality suite"
+	@echo "make lint      ruff over src/ and tests/"
 	@echo "make train     baselines + ARIMA + ridge + LightGBM, pooled and per asset, on next-day direction"
 	@echo "make vol       baselines + GARCH on next-day volatility"
 	@echo "make deep      LSTM, CNN and DLinear on next-day direction"
 	@echo "make backtest  cost sweep and equity curves for $(RUN)"
 	@echo "make report    summary tables and figures for $(RUN)"
 	@echo "make all       data, test, train, vol, deep, backtest, report"
-	@echo "make clean     remove generated results and caches, keep raw data"
+	@echo "make clean     remove caches and the derived panel; committed results are kept"
 
 setup:
-	$(PY) -m pip install -r requirements.txt
+	$(PY) -m pip install -r requirements-dev.txt
 
 data:
 	$(PY) -m src.data.build_panel --config $(CONFIG)
 
 test:
 	$(PY) -m pytest tests/ -q
+
+lint:
+	$(PY) -m ruff check src tests
 
 train:
 	$(PY) -m src.train --config $(CONFIG) \
@@ -62,8 +66,10 @@ report:
 
 all: data test train vol deep backtest report
 
+# reports/results and reports/figures are committed and cited by the README,
+# so clean leaves them alone. Delete a run directory by hand if you mean to.
 clean:
-	rm -rf reports/results reports/figures reports/data_quality.md
+	rm -rf reports/data_quality.md
 	rm -rf data/interim data/processed
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
-	rm -rf .pytest_cache
+	rm -rf .pytest_cache .ruff_cache

@@ -1,6 +1,6 @@
 """Coinbase Exchange daily candles, used as an independent price cross-check.
 
-Spec section 4.2. Binance is the primary source; this module exists so that
+Binance is the primary source; this module exists so that
 BTC closes can be reconciled against a second venue. The two disagree by a
 small persistent basis because Coinbase quotes USD and Binance quotes USDT,
 so the reconciliation reports a percentage difference rather than equality.

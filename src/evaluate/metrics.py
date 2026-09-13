@@ -282,8 +282,8 @@ def qlike(y_true_var: np.ndarray, pred_var: np.ndarray) -> float:
     positive otherwise. Both arguments must be strictly positive VARIANCES.
     Passing log variances or standard deviations is a silent scale error that
     still returns a plausible number, so non-positive input raises rather than
-    returning nan. Convert first: a ``vol_1d`` target stored as log volatility
-    becomes a variance as ``np.exp(2 * y)``.
+    returning nan. Convert first: the ``vol_1d`` target is a log variance, so it
+    becomes a variance as ``np.exp(y)``.
     """
     y, f = _clean_pair(y_true_var, pred_var)
     if y.size == 0:

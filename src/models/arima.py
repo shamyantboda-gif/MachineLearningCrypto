@@ -8,8 +8,18 @@ Out-of-sample forecasting is done the honest way. Parameters are estimated on
 the training window and then frozen. The fitted state is extended through the
 test period with ``append(refit=False)``, which feeds in the actual observed
 returns one at a time and reads off the one step ahead prediction at each
-point. Every forecast for date ``t+1`` therefore uses real data up to ``t`` and
-parameters that never saw the test window.
+point. The row dated ``t`` carries the forecast of the return over ``t`` to
+``t+1``, made from returns up to and including ``t``, with parameters that
+never saw the test window.
+
+The series is handed to statsmodels as a plain array rather than a dated one.
+A dated series has to extend the model's own index exactly for ``append`` to
+accept it, and the purge and embargo gap between the training and test
+windows guarantees it never does; an earlier version of this file swallowed
+that error and scored the training mean on every row. The cost of the plain
+array is that the filter state carries across the gap as if the windows were
+contiguous, which for a model with two lags of memory touches the first
+couple of forecasts of each fold.
 
 The expected outcome is worth stating in advance: on daily crypto returns the
 information criteria usually select an order close to (0, 0, 0), and the model
@@ -50,7 +60,7 @@ class ArimaModel(Model):
         self.sigma_: dict[str, float] = {}
         self.train_mean_: dict[str, float] = {}
 
-    def fit(self, fold: FoldData) -> "ArimaModel":
+    def fit(self, fold: FoldData) -> ArimaModel:
         from statsmodels.tsa.arima.model import ARIMA
 
         series_by_asset = _returns_by_asset(fold.meta_train)
@@ -63,19 +73,17 @@ class ArimaModel(Model):
             # so the fit uses the most recent window.
             series = series.iloc[-self.max_train_obs :]
 
+            # (0, 0, 0), a pure mean model, stays in the grid: it is a
+            # legitimate and common winner on daily returns.
+            values = series.to_numpy(dtype=float)
             best_order, best_result, best_score = None, None, np.inf
             for p in self.p_range:
                 for q in self.q_range:
-                    if p == 0 and q == 0:
-                        # A pure mean model is a legitimate and common choice
-                        # here, so it stays in the grid rather than being
-                        # excluded as trivial.
-                        pass
                     try:
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore")
                             fitted = ARIMA(
-                                series,
+                                values,
                                 order=(p, self.d, q),
                                 trend="c",
                                 enforce_stationarity=True,
@@ -112,21 +120,26 @@ class ArimaModel(Model):
                 out.loc[asset] = fallback
                 continue
 
-            clean = series.ffill().fillna(0.0)
-            try:
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    # refit=False is the whole point: the parameters stay as
-                    # estimated on train while the state absorbs real data.
-                    extended = result.append(clean, refit=False)
-                    predictions = extended.predict(
-                        start=len(extended.model.endog) - len(clean),
-                        end=len(extended.model.endog) - 1,
-                    )
-                values = np.asarray(predictions, dtype=float)
-            except Exception:
-                values = np.full(len(clean), self.train_mean_.get(asset, 0.0))
-
+            clean = series.ffill().fillna(0.0).to_numpy(dtype=float)
+            n_train = int(result.nobs)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                # refit=False is the whole point: the parameters stay as
+                # estimated on train while the state absorbs real data.
+                extended = result.append(clean, refit=False)
+                # Index i of the extended sample is the observed return ending
+                # on the date of row i. The forecast that belongs on row i is
+                # the one for index i + 1, so the window is shifted by one and
+                # its last value is a genuine one step out-of-sample forecast.
+                predictions = extended.predict(
+                    start=n_train + 1,
+                    end=n_train + len(clean),
+                )
+            values = np.asarray(predictions, dtype=float)
+            if len(values) != len(clean):
+                raise RuntimeError(
+                    f"ARIMA produced {len(values)} forecasts for {len(clean)} rows of {asset}"
+                )
             out.loc[asset] = values
 
         return out.fillna(0.0)

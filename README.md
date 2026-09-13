@@ -35,9 +35,9 @@ Fold-mean accuracy, pooled across assets. The DM column is a Diebold-Mariano tes
 | lightgbm | 0.5140 (SD 0.0362) | 0.5142 | 0.5239 | 0.0263 | 15 of 27 | 0.66 |
 | lightgbm_per_asset | 0.5110 (SD 0.0348) | 0.5142 | 0.5167 | 0.0164 | 12 of 27 | 0.36 |
 | historical mean | 0.5089 | 0.5142 | 0.4985 | 0.0100 | 7 of 27 | <0.001 |
+| arima | 0.5076 (SD 0.0418) | 0.5142 | 0.5069 | 0.0082 | 12 of 27 | 0.14 (worse) |
 | ridge_per_asset | 0.5070 (SD 0.0392) | 0.5142 | 0.5183 | 0.0106 | 13 of 27 | 0.22 |
 | majority class | 0.4901 | 0.5142 | 0.4722 | -0.0409 | 1 of 27 | <0.001 |
-| arima | 0.4806 | 0.5142 | 0.4720 | -0.0455 | 4 of 27 | <0.001 |
 | persistence | 0.4724 | 0.5142 | 0.4616 | -0.0586 | 6 of 27 | <0.001 |
 
 No model is significantly better than a constant 0.5. Ridge is significantly worse: it has the second-best ROC-AUC and still loses on Brier, because AUC asks whether up-days are ranked above down-days and Brier asks whether the printed number is a probability. Ridge's per-fold Brier ranges 0.240 to 0.288 against the abstainer's 0.250 by construction. It is confident at the wrong times.
@@ -144,7 +144,7 @@ For the sequence models the per-asset arm has the higher fold-mean accuracy for 
 
 ### What the trees looked at
 
-Feature importance is not stable enough to interpret. `px_ret_1` ranks 1st on one fold and 270th on another. By mean gain the top features were `px_ret_1`, `rng_close_position`, `xa_market_ret_lag1`, `cal_dow_cos` and `aux_fng`; six of the top twelve are cross-asset, the one place the design expected to find something, and two are calendar sines, which is what a model finds when there is nothing else.
+LightGBM gain, averaged over the five seeds within each fold and then ranked. The top three are stable: `px_ret_1`, `rng_close_position` and `xa_market_ret_lag1` sit in the top five on 24, 25 and 27 of 27 folds. Below them the order is not: 25 of the 80 features appear in some fold's top ten, and four different features take first place on at least one fold. By mean gain the next two are `cal_dow_cos` and `aux_fng`; six of the top twelve are cross-asset, the one place the design expected to find something, and three are calendar sines, which is what a model finds when there is nothing else. An earlier draft of this paragraph said `px_ret_1` ranked 270th on one fold, which is impossible with 80 features; it came from ranking the five seeds' importances together, and `feature_importance.csv` now records the seed so that cannot recur.
 
 ## Volatility: next-day log realised variance, 27 folds
 
@@ -251,6 +251,7 @@ Most were caught by measurement rather than by reading code, which is the argume
 - **Diebold-Mariano under the wrong loss for volatility.** Squared error on log variance said GARCH was significantly worse than the trailing mean while QLIKE in the next column said it was better. Both were computed correctly; the test now runs under the metric the table ranks on.
 - **Per-asset tables that were never written.** `per_asset_results` and `per_asset_breakdown` were defined, documented, and called from nowhere. The four per-asset numbers in the earlier README were computed by hand and had no file behind them. Every run now writes `per_asset.csv` and `dm_per_asset.csv`, and the backtest writes `backtest_per_asset.csv`.
 - **GARCH forecasting a constant.** `arch`'s `forecast()` returns a value only at the final observation unless passed `start`; every other test row silently fell back to a per-asset constant.
+- **ARIMA forecasting a constant, for the life of the project.** `append(refit=False)` requires the test series' index to extend the model's own, and the purge and embargo gap guarantees it never does. The call raised on every fold, a bare `except` scored the training mean on every row, and because that mean has one sign per fold the model called the same direction every day. The 48.06% in an earlier README was `1 - base rate` and its p-value was a test of a constant; the real ARIMA is at 50.76%, indistinguishable from abstaining. Three of its 81 asset-fold cells still print a constant, legitimately: the information criterion chose the pure-mean order (0, 0, 0) there. Found by a code review that asked why no test asserted a model's forecasts vary within a fold; `tests/test_no_leakage.py` now asserts that for ARIMA and checks its forecasts are causal the same way it does for GARCH.
 - **Diebold-Mariano comparing labels to probabilities.** Hard 0/1 labels against a constant 0.5 under squared loss made abstaining unbeatable by construction.
 - **A volatility baseline in the wrong units.** The historical-mean baseline predicted a mean return of ~0.001 against a log-variance target of ~-7.
 - **Rolling windows spanning two assets.** A missing `groupby(level='asset')`. Caught by comparing a single-asset build against the same asset's rows in a multi-asset build.
@@ -263,19 +264,21 @@ Most were caught by measurement rather than by reading code, which is the argume
 - **Per-asset tests are uncorrected.** Twelve per-asset direction tests, six per-asset volatility tests and eight scope comparisons are reported at face value and labelled exploratory. The pooled tests are the headline. For direction the omission is conservative because nothing survives; for volatility it is not needed because everything survives at p < 0.02, well inside any correction.
 - **GARCH(1,1) on BTC is a constant.** See above. The per-asset volatility rows for BTC compare EGARCH, which fitted, against a fallback, which did not.
 - **One horizon.** Everything is one day ahead.
+- **Every model is fitted on the first 80% of its window.** The most recent fifth of each training window is the early-stopping slice, and it is held out from every model, including ridge, ARIMA and GARCH, which have no use for it. Nothing leaks, but the state-carrying models start each test window from a fit that ended months earlier, and no model is refitted on train plus validation once its hyper-parameters are chosen.
 - **USDT, not USD.** Deepest books and longest history, but the peg has broken briefly on a handful of days.
 - **One hand-argued exception in the leakage scan.** `src/models/garch.py` is the only file under `src/` allowed a backward shift, because reading the variance recursion one row ahead is a genuine one-step forecast. The justification is written next to the allowlist entry in `tests/test_no_leakage.py`.
 
 ## Not done, named rather than omitted
 
-Relaxing the GARCH stationarity guard to admit an integrated fit for one-step forecasting, which would give BTC a real GARCH(1,1) row. A per-asset scaler for the per-asset arm. Hourly bars (same archive, 24× the data). Point-in-time universe including delisted pairs. Horizon-decay curve. Order-book imbalance from the depth snapshots in the same archive. Triple-barrier labels, conformal intervals, regime-switching models. Optuna and MLflow: hyperparameters are frozen in YAML and runs are tracked by config hash in a CSV.
+Relaxing the GARCH stationarity guard to admit an integrated fit for one-step forecasting, which would give BTC a real GARCH(1,1) row. Refitting on train plus validation for the models that do not early-stop. A per-asset scaler for the per-asset arm. Hourly bars (same archive, 24× the data). Point-in-time universe including delisted pairs. Horizon-decay curve. Order-book imbalance from the depth snapshots in the same archive. Triple-barrier labels, conformal intervals, regime-switching models. Optuna and MLflow: hyperparameters are frozen in YAML and runs are tracked by config hash in a CSV.
 
 ## Reproduce
 
 ```bash
 pip install -r requirements.txt
 make data      # 320 monthly files, checksum-verified, ~15 min first run, cached after
-make test      # 104 tests, mostly leakage, alignment and per-asset contracts
+make test      # 107 tests, mostly leakage, alignment and per-asset contracts; the 12 that read the real panel skip until make data has run
+make lint      # ruff, same rule set as CI
 make train     # baselines + ARIMA + ridge + LightGBM, pooled and per asset, on direction
 make vol       # baselines + GARCH/EGARCH on volatility
 make deep      # LSTM, 1D CNN, DLinear, pooled and per asset, 5 seeds each (about 5 h, CPU)
@@ -283,7 +286,7 @@ make backtest  # cost sweep, equity curves, per-asset books
 make report    # summary tables, per-asset tables, figures
 ```
 
-If `make` is not on your PATH, each target is one `python -m src.<module>` line in the `Makefile`.
+If `make` is not on your PATH, each target is one `python -m src.<module>` line in the `Makefile`. `requirements-dev.txt` adds ruff on top of the pinned runtime dependencies; the GitHub Actions workflow in `.github/workflows/ci.yml` runs lint and the test suite on every push.
 
 Python 3.11+; developed on 3.14.3 with pandas 3.0.5, numpy 2.5.2, torch 2.14.0, all pinned. No GPU anywhere.
 
@@ -300,15 +303,20 @@ Every model in a table was evaluated on the same folds and rows as the baselines
 ```
 config/            base.yaml plus one file per model family, and a *_per_asset.yaml for each
 src/
+  config.py        YAML loading, deep merge, the config hash that names a run
+  schema.py        column names and the (asset, date) panel index
+  preprocess.py    per-fold winsorising and scaling, fitted on training rows only
   data/            fetchers, validation suite, panel builder, targets
   features/        one module per family, plus the registry
   splits/          purged and embargoed walk-forward splitter
   models/          baselines, ARIMA, GARCH, ridge, LightGBM, LSTM, CNN, DLinear, per-asset wrapper
-  evaluate/        metrics, Diebold-Mariano, reporting
+  evaluate/        metrics, Diebold-Mariano, result tables, reporting
   backtest/        cost model and engine, written from scratch
   train.py         experiment runner
-tests/             alignment, leakage, causality and per-asset checks
+  run_backtest.py  cost sweep and equity curves for a finished run
+tests/             alignment, leakage, causality and per-asset checks, on a synthetic panel
 notebooks/         exploration and results analysis, not the pipeline
+reports/results/   one directory per run, named by config hash; runs.csv indexes them
 ```
 
 ## References

@@ -19,8 +19,8 @@ sample quietly passing as the same one.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -50,7 +50,7 @@ class PerAssetModel(Model):
         self.models_: dict[str, Model] = {}
         self.skipped_: dict[str, int] = {}
 
-    def fit(self, fold: FoldData) -> "PerAssetModel":
+    def fit(self, fold: FoldData) -> PerAssetModel:
         self.models_, self.skipped_ = {}, {}
         for asset in _assets(fold.X_train):
             sub = _slice_fold(fold, asset)

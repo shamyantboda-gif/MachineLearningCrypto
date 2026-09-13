@@ -80,7 +80,7 @@ class RidgeModel(Model):
             return float(log_loss(y_val.astype(int), proba, labels=[0, 1]))
         return float(mean_squared_error(y_val.astype(float), estimator.predict(X_val)))
 
-    def fit(self, fold: FoldData) -> "RidgeModel":
+    def fit(self, fold: FoldData) -> RidgeModel:
         self.feature_names_ = list(fold.X_train.columns)
         task = fold.task
 

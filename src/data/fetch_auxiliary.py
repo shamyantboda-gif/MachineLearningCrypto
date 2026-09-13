@@ -1,6 +1,6 @@
 """Auxiliary feature sources: sentiment, on-chain activity and macro context.
 
-Spec section 4.3. These feed the ``auxiliary`` feature family, which the
+These feed the ``auxiliary`` feature family, which the
 ablation study can switch off entirely. That is the design principle for the
 whole module: every fetcher here is optional, so every fetcher degrades to an
 empty frame with a printed warning instead of raising. A free public API that
@@ -31,7 +31,8 @@ import pandas as pd
 import requests
 
 from src import schema
-from src.config import RAW_DIR, get as config_get
+from src.config import RAW_DIR
+from src.config import get as config_get
 
 FNG_URL = "https://api.alternative.me/fng/"
 COINMETRICS_URL = "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics"
@@ -213,7 +214,7 @@ def fetch_coinmetrics(
 
     The community tier does not cover every asset. It rejects an unauthorised
     pair with a 403 that fails the *entire* request, so a single batched call
-    for btc,eth,ltc,sol returns nothing at all when only sol is unavailable.
+    for several assets returns nothing at all when only one is unavailable.
     The request is therefore narrowed on refusal: all assets together first,
     then one asset at a time, then one metric at a time for the asset that
     still refuses. Whatever survives is kept and the rest becomes NaN.

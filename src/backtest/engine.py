@@ -83,7 +83,7 @@ def _check_panel_series(series: pd.Series, name: str) -> pd.Series:
     return out
 
 
-def _empty_result(label: str, cost_model: CostModel, periods_per_year: int) -> "BacktestResult":
+def _empty_result(label: str, cost_model: CostModel, periods_per_year: int) -> BacktestResult:
     """A result object for an empty overlap, so callers never have to branch."""
     index = pd.MultiIndex.from_arrays([[], []], names=[ASSET, DATE])
     empty_dates = pd.Series(dtype="float64")

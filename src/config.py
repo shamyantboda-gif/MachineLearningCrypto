@@ -36,7 +36,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def load_yaml(path: str | Path) -> dict:
-    with open(path, "r", encoding="utf-8") as handle:
+    with open(path, encoding="utf-8") as handle:
         return yaml.safe_load(handle) or {}
 
 
@@ -62,13 +62,11 @@ def ensure_dirs() -> None:
 
 
 def set_global_seed(seed: int) -> None:
-    """Seed every RNG we might touch. Constraint C7."""
-    import os
+    """Seed every RNG the pipeline might touch: Python, NumPy and, if present, torch."""
     import random
 
     import numpy as np
 
-    os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
     try:
@@ -76,7 +74,6 @@ def set_global_seed(seed: int) -> None:
 
         torch.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-        torch.use_deterministic_algorithms(False)
     except ImportError:
         pass
 

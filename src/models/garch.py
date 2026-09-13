@@ -35,8 +35,8 @@ import numpy as np
 import pandas as pd
 
 from src import schema
-from src.models.base import REGRESSION, FoldData, Model
 from src.models.arima import _returns_by_asset
+from src.models.base import REGRESSION, FoldData, Model
 
 # arch fits far more reliably on percent returns than on decimals.
 _PERCENT = 100.0
@@ -158,7 +158,7 @@ class GarchModel(Model):
         volatility.compute_variance(vol_params, resids, sigma2, backcast, var_bounds)
         return sigma2
 
-    def fit(self, fold: FoldData) -> "GarchModel":
+    def fit(self, fold: FoldData) -> GarchModel:
         for asset, series in _returns_by_asset(fold.meta_train).items():
             clean = series.dropna() * _PERCENT
             if len(clean) < 250:
@@ -184,9 +184,10 @@ class GarchModel(Model):
                     # happens on the short, extremely volatile early history of
                     # a young asset. Such a fit is discarded rather than used,
                     # because it does not merely forecast badly, it forecasts
-                    # backwards: on SOL an unstable fit scored a correlation of
-                    # -0.34 against realised variance while the stable fits on
-                    # the other three assets scored around +0.5.
+                    # backwards: on SOL, an asset since dropped from the study, an
+                    # unstable fit scored a correlation of -0.34 against
+                    # realised variance while the stable fits on the other
+                    # assets scored around +0.5.
                     continue
                 self.fitted_params_[asset] = result.params
                 self.train_series_[asset] = clean

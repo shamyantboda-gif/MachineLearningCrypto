@@ -114,7 +114,7 @@ class Model(ABC):
         self.fitted_ = False
 
     @abstractmethod
-    def fit(self, fold: FoldData) -> "Model":
+    def fit(self, fold: FoldData) -> Model:
         """Fit on ``fold.X_train`` / ``fold.y_train`` only."""
 
     @abstractmethod

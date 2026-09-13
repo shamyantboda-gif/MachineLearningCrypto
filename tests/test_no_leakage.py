@@ -47,8 +47,8 @@ FEATURE_NEGATIVE_SHIFT_ALLOWLIST = {"src/data/targets.py"}
 # GARCH(1,1), sigma^2 at t+1 is omega + alpha * eps_t^2 + beta * sigma^2_t, so
 # the value the recursion holds for t+1 is already determined by data at or
 # before t. Taking the next row is therefore a genuine one step ahead forecast
-# rather than a peek, the parameters are frozen with fix() from the training
-# fold, and the module says so in its docstring. It is listed here rather than
+# rather than a peek, the parameters are estimated on the training fold and
+# frozen, and the module says so in its docstring. It is listed here rather than
 # left to fail because it is not a leak, but it is the one place in the tree
 # where that argument has to be made by hand, so it is written down.
 #
@@ -354,7 +354,7 @@ def test_increasing_the_embargo_strictly_shrinks_the_training_data(
     )
 
     for fold_id, (none, medium, large) in enumerate(
-        zip(counts[0], counts[5], counts[20])
+        zip(counts[0], counts[5], counts[20], strict=True)
     ):
         assert none > medium > large, (
             f"fold {fold_id}: fitting rows for embargo 0/5/20 are "
@@ -914,6 +914,91 @@ def test_garch_forecasts_do_not_change_when_later_data_changes(
         "changing the returns after the cut changed no forecast at all, so the "
         "perturbation never reached the model and the assertion above is "
         "vacuous"
+    )
+
+
+def _fitted_arima(synthetic_panel, base_config):
+    """An AR(1) fitted on the last synthetic fold, together with that fold.
+
+    The order is pinned rather than selected so the test does not depend on
+    the information criterion picking a non-trivial model on a random walk.
+    """
+    from src.models.arima import ArimaModel
+
+    matrix = _synthetic_matrix(synthetic_panel, base_config)
+    _, folds = _folds(matrix.X.index)
+    fold_data = _fold_data(matrix, folds[-1], "dir_1d")
+
+    model = ArimaModel(params={"p_range": [1], "q_range": [0]}, task=CLASSIFICATION)
+    model.fit(fold_data)
+    assert model.results_ and set(model.results_) == set(model.orders_), (
+        "ARIMA fitted no asset on this fold, so every assertion below would be "
+        "comparing one constant fallback against another"
+    )
+    return model, fold_data
+
+
+def _arima_forecasts(model, meta: pd.DataFrame) -> np.ndarray:
+    safe = model._safe_meta(meta)
+    return np.asarray(model._point_forecasts(safe, safe), dtype=float)
+
+
+def test_arima_forecasts_vary_within_a_fold(synthetic_panel, base_config):
+    """Every ARIMA forecast on a fold must not be the same number.
+
+    The committed results once carried an ARIMA whose ``append`` raised on
+    every fold because the test series' index did not extend the model's, and
+    whose bare except then scored the training mean on every row. That model
+    called "down" on every day of the study and nothing noticed for weeks. A
+    forecast series with zero range is the signature of that failure.
+    """
+    model, fold_data = _fitted_arima(synthetic_panel, base_config)
+    forecasts = _arima_forecasts(model, fold_data.meta_test)
+    assets = fold_data.meta_test.index.get_level_values(schema.ASSET)
+    for asset in assets.unique():
+        block = forecasts[np.asarray(assets == asset)]
+        assert np.isfinite(block).all(), f"non-finite ARIMA forecast on {asset}"
+        assert np.ptp(block) > 0, (
+            f"every ARIMA forecast for {asset} on this fold is identical, so the "
+            "model is returning a constant rather than a forecast"
+        )
+
+
+@pytest.mark.parametrize("cut", [0, 20])
+def test_arima_forecasts_do_not_change_when_later_data_changes(
+    synthetic_panel, base_config, cut
+):
+    """The forecast on row t is a function of returns up to t and nothing else.
+
+    The row dated t carries the one step ahead forecast made from the return
+    ending on t, so multiplying every return after a boundary by twenty must
+    leave every forecast on or before the boundary bit-identical and must move
+    at least one forecast after it.
+    """
+    model, fold_data = _fitted_arima(synthetic_panel, base_config)
+    meta_test = fold_data.meta_test
+    dates = _dates_of(meta_test.index).unique().sort_values()
+    assert len(dates) > cut + 5, "test window too short for this cut"
+    boundary = dates[cut]
+
+    baseline = _arima_forecasts(model, meta_test)
+    assert np.ptp(baseline) > 0, "constant forecasts would make this test vacuous"
+
+    perturbed = meta_test.copy()
+    later = _dates_of(perturbed.index) > boundary
+    assert later.any(), "nothing after the cut to perturb"
+    perturbed.loc[later, "ret_lag1"] = perturbed.loc[later, "ret_lag1"] * 20.0
+
+    after = _arima_forecasts(model, perturbed)
+
+    unchanged = _dates_of(meta_test.index) <= boundary
+    assert np.array_equal(baseline[unchanged], after[unchanged]), (
+        f"an ARIMA forecast dated on or before {boundary.date()} moved when "
+        "returns after that date were changed: the filter is reading the future"
+    )
+    assert not np.array_equal(baseline[~unchanged], after[~unchanged]), (
+        "changing the returns after the cut changed no forecast at all, so the "
+        "perturbation never reached the model"
     )
 
 

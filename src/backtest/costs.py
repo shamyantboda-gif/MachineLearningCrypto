@@ -20,7 +20,7 @@ BPS = 1e-4
 class CostModel:
     """Commission and slippage assumptions for one backtest.
 
-    Defaults follow the project spec: Binance spot taker fees are roughly 10 bps
+    Defaults: Binance spot taker fees are roughly 10 bps
     for a round trip, and 5 bps of slippage per trade is a fair assumption for
     the liquid pairs in this panel.
     """
@@ -76,7 +76,7 @@ class CostModel:
         return np.abs(np.asarray(turnover, dtype="float64")) * self.rate_per_unit_turnover
 
     @classmethod
-    def from_round_trip_bps(cls, bps: float) -> "CostModel":
+    def from_round_trip_bps(cls, bps: float) -> CostModel:
         """Build a model whose round trip cost is exactly ``bps``.
 
         The cost sweep quotes levels such as [0, 5, 20] bps round trip and the

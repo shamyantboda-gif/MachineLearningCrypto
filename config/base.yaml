@@ -34,7 +34,7 @@ targets:
   # Which target this run trains and evaluates.
   # ret_1d  -> next-day log return (regression)
   # dir_1d  -> next-day direction (binary classification)
-  # vol_1d  -> log next-day Parkinson volatility (regression)
+  # vol_1d  -> log next-day Parkinson variance (regression)
   primary: dir_1d
   horizon: 1
 

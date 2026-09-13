@@ -69,7 +69,7 @@ class AssetCodec:
     asset_codes: dict[str, int] = field(default_factory=dict)
 
     @classmethod
-    def from_labels(cls, labels: object) -> "AssetCodec":
+    def from_labels(cls, labels: object) -> AssetCodec:
         unique = sorted({str(label) for label in np.asarray(labels).ravel().tolist()})
         return cls(asset_codes={name: code for code, name in enumerate(unique)})
 
@@ -371,7 +371,7 @@ class BaseTorchModel(Model):
 
     # -- fit -----------------------------------------------------------
 
-    def fit(self, fold: FoldData) -> "BaseTorchModel":
+    def fit(self, fold: FoldData) -> BaseTorchModel:
         started = time.perf_counter()
         set_torch_seed(self.seed)
 

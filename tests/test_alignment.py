@@ -23,7 +23,6 @@ from src.data.targets import DIR, FWD_SIMPLE_RETURN, RET, build_targets
 from src.features.registry import build_features
 from tests.conftest import requires_real_panel
 
-
 # ---------------------------------------------------------------------------
 # Row by row against hand computed answers
 # ---------------------------------------------------------------------------

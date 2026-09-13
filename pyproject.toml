@@ -10,3 +10,10 @@ addopts = "-q"
 
 [tool.ruff]
 line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Pyflakes, the pycodestyle subset ruff enables by default, import order,
+# pyupgrade and bugbear. Line length is left to judgement; the tables and
+# comments in this project are wider than a formatter would like.
+select = ["E4", "E7", "E9", "F", "W", "I", "UP", "B"]

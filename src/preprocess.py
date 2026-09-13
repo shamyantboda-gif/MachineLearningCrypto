@@ -1,7 +1,6 @@
 """Per-fold feature preprocessing.
 
-Constraint C5 of the project spec says every scaler, imputer and feature
-statistic is fit on the training fold only. Fitting a ``StandardScaler`` on the
+Every scaler, imputer and feature statistic is fit on the training fold only. Fitting a ``StandardScaler`` on the
 whole series leaks future volatility backward into the past, and it is the most
 common bug in this category of project.
 
@@ -41,7 +40,7 @@ class FoldPreprocessor:
     fitted_: bool = field(default=False, init=False)
     n_fit_rows_: int = field(default=0, init=False)
 
-    def fit(self, X_train: pd.DataFrame) -> "FoldPreprocessor":
+    def fit(self, X_train: pd.DataFrame) -> FoldPreprocessor:
         """Learn clip bounds, centring and scaling from the training rows."""
         if X_train.empty:
             raise ValueError("cannot fit a preprocessor on an empty training frame")
@@ -102,7 +101,7 @@ class FoldPreprocessor:
         return self.fit(X_train).transform(X_train)
 
     @classmethod
-    def from_config(cls, config: dict) -> "FoldPreprocessor":
+    def from_config(cls, config: dict) -> FoldPreprocessor:
         features = config.get("features", {})
         winsorize = features.get("winsorize", {})
         return cls(

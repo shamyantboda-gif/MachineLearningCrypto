@@ -37,7 +37,7 @@ class LightGBMModel(Model):
         self.feature_names_: list[str] = []
         self.best_iteration_: int | None = None
 
-    def fit(self, fold: FoldData) -> "LightGBMModel":
+    def fit(self, fold: FoldData) -> LightGBMModel:
         import lightgbm as lgb
 
         self.feature_names_ = list(fold.X_train.columns)

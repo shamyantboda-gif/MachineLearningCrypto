@@ -266,7 +266,11 @@ def run(
                 importance_frames.append(
                     importance.rename("gain")
                     .to_frame()
-                    .assign(model=model.name, fold=fold.fold_id)
+                    .assign(
+                        model=model.name,
+                        fold=fold.fold_id,
+                        seed=model_seed if model.is_stochastic else np.nan,
+                    )
                     .reset_index(names="feature")
                 )
 
