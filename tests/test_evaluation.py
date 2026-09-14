@@ -116,7 +116,7 @@ def test_dm_table_survives_an_empty_run():
 
 @pytest.mark.parametrize(
     ("target", "expected"),
-    [("dir_1d", "zero"), ("ret_1d", "zero"), ("vol_1d", "vol_climatology")],
+    [("dir_1d", "zero"), ("ret_1d", "zero"), ("vol_1d", "vol_ewma")],
 )
 def test_default_dm_baseline_matches_the_baselines_each_target_builds(target, expected):
     """The default must name a model that target's run actually produces."""

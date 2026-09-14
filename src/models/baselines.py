@@ -191,11 +191,16 @@ class VolatilityPersistenceBaseline(Model):
 
 
 class VolatilityClimatologyBaseline(Model):
-    """Trailing mean log realised variance.
+    """Trailing mean of LOG realised variance: a geometric mean in levels.
 
-    The right unconditional null for a volatility target. Predicting a return
-    baseline against a log variance target is not a weak forecast, it is a
-    category error, so this replaces the historical mean baseline here.
+    Kept, and named for what it is. Averaging in logs and exponentiating gives
+    the geometric mean, which sits below the arithmetic mean by the Jensen gap,
+    so in variance units this forecast is biased low by construction. QLIKE
+    punishes under-forecasting far harder than over-forecasting, so under the
+    headline metric this baseline loses to any level-space average of the same
+    data. It stays in the table so that the GARCH margin over it can be seen
+    for what it is; ``vol_trailing_mean`` and ``vol_ewma`` below are the fair
+    comparisons, and the Diebold-Mariano test runs against ``vol_ewma``.
     """
 
     name = "vol_climatology"
@@ -222,6 +227,107 @@ class VolatilityClimatologyBaseline(Model):
         return trailing.fillna(self.train_mean_).to_numpy(dtype=float)
 
 
+def _combined_realised(
+    train_tail: dict[str, pd.Series], meta: pd.DataFrame
+) -> dict[str, pd.Series]:
+    """Per asset, the training tail followed by the test rows of realised variance.
+
+    Both level-space baselines below need history before the first test date,
+    otherwise their opening forecasts are built from a handful of rows. The
+    tail stored at fit time is training data, so it carries nothing from the
+    test window; the purge and embargo gap between the two is simply crossed,
+    as the GARCH recursion crosses it.
+    """
+    out: dict[str, pd.Series] = {}
+    current = meta[REALISED_VAR_NOW].replace(0.0, np.nan)
+    for asset, group in current.groupby(level="asset", observed=True):
+        test = group.droplevel("asset")
+        tail = train_tail.get(str(asset))
+        combined = pd.concat([tail, test]) if tail is not None else test
+        combined = combined[~combined.index.duplicated(keep="last")].sort_index()
+        out[str(asset)] = combined
+    return out
+
+
+class VolatilityTrailingMeanBaseline(Model):
+    """Trailing ARITHMETIC mean of realised variance, in variance units.
+
+    The same window as ``vol_climatology`` and the same input, averaged in
+    levels rather than in logs, so it is unbiased for the variance rather than
+    for its logarithm. This is the fair "trailing mean" under QLIKE.
+    """
+
+    name = "vol_trailing_mean"
+
+    def __init__(self, params: dict | None = None, task: str = REGRESSION, seed: int = 42):
+        super().__init__(params, task, seed)
+        self.window = int(self.params.get("historical_mean_window", 63))
+        self.train_tail_: dict[str, pd.Series] = {}
+        self.train_log_mean_ = 0.0
+
+    def fit(self, fold: FoldData) -> VolatilityTrailingMeanBaseline:
+        if REALISED_VAR_NOW in fold.meta_train.columns:
+            current = fold.meta_train[REALISED_VAR_NOW].replace(0.0, np.nan)
+            levels = current.dropna()
+            self.train_log_mean_ = float(np.log(levels.mean())) if len(levels) else 0.0
+            for asset, group in current.groupby(level="asset", observed=True):
+                self.train_tail_[str(asset)] = group.droplevel("asset").iloc[-self.window :]
+        self.fitted_ = True
+        return self
+
+    def predict(self, X: pd.DataFrame, meta: pd.DataFrame | None = None) -> np.ndarray:
+        if meta is None or REALISED_VAR_NOW not in meta.columns:
+            return np.full(len(X), self.train_log_mean_)
+        out = pd.Series(np.nan, index=X.index, dtype=float)
+        for asset, combined in _combined_realised(self.train_tail_, meta).items():
+            trailing = combined.rolling(self.window, min_periods=10).mean()
+            test_index = meta.xs(asset, level="asset", drop_level=False).index
+            values = trailing.reindex(test_index.get_level_values("date"))
+            out.loc[test_index] = np.log(values.clip(lower=1e-12)).to_numpy(dtype=float)
+        return out.fillna(self.train_log_mean_).to_numpy(dtype=float)
+
+
+class VolatilityEwmaBaseline(Model):
+    """RiskMetrics: an exponentially weighted moving average of realised variance.
+
+    ``sigma2[t] = lam * sigma2[t-1] + (1 - lam) * rv[t]`` with ``lam = 0.94``,
+    the value J.P. Morgan published for daily data in 1996. One line, no
+    fitted parameters, causal by construction. Under QLIKE it is the strongest
+    simple forecast on this panel, which is why the Diebold-Mariano test for
+    the volatility target is run against it.
+    """
+
+    name = "vol_ewma"
+
+    def __init__(self, params: dict | None = None, task: str = REGRESSION, seed: int = 42):
+        super().__init__(params, task, seed)
+        self.lam = float(self.params.get("ewma_lambda", 0.94))
+        self.train_tail_: dict[str, pd.Series] = {}
+        self.train_log_mean_ = 0.0
+
+    def fit(self, fold: FoldData) -> VolatilityEwmaBaseline:
+        if REALISED_VAR_NOW in fold.meta_train.columns:
+            current = fold.meta_train[REALISED_VAR_NOW].replace(0.0, np.nan)
+            levels = current.dropna()
+            self.train_log_mean_ = float(np.log(levels.mean())) if len(levels) else 0.0
+            for asset, group in current.groupby(level="asset", observed=True):
+                # 250 rows is where the weight on anything older is below 2e-7.
+                self.train_tail_[str(asset)] = group.droplevel("asset").iloc[-250:]
+        self.fitted_ = True
+        return self
+
+    def predict(self, X: pd.DataFrame, meta: pd.DataFrame | None = None) -> np.ndarray:
+        if meta is None or REALISED_VAR_NOW not in meta.columns:
+            return np.full(len(X), self.train_log_mean_)
+        out = pd.Series(np.nan, index=X.index, dtype=float)
+        for asset, combined in _combined_realised(self.train_tail_, meta).items():
+            smoothed = combined.ewm(alpha=1.0 - self.lam, adjust=False, ignore_na=True).mean()
+            test_index = meta.xs(asset, level="asset", drop_level=False).index
+            values = smoothed.reindex(test_index.get_level_values("date"))
+            out.loc[test_index] = np.log(values.clip(lower=1e-12)).to_numpy(dtype=float)
+        return out.fillna(self.train_log_mean_).to_numpy(dtype=float)
+
+
 BASELINE_REGISTRY = {
     "zero": ZeroBaseline,
     "persistence": PersistenceBaseline,
@@ -229,6 +335,8 @@ BASELINE_REGISTRY = {
     "majority_class": MajorityClassBaseline,
     "vol_persistence": VolatilityPersistenceBaseline,
     "vol_climatology": VolatilityClimatologyBaseline,
+    "vol_trailing_mean": VolatilityTrailingMeanBaseline,
+    "vol_ewma": VolatilityEwmaBaseline,
 }
 
 # Which baselines make sense for which target. Majority class is meaningless
@@ -237,7 +345,7 @@ BASELINE_REGISTRY = {
 BASELINES_BY_TARGET = {
     "ret_1d": ["zero", "persistence", "historical_mean"],
     "dir_1d": ["zero", "persistence", "historical_mean", "majority_class"],
-    "vol_1d": ["vol_persistence", "vol_climatology"],
+    "vol_1d": ["vol_persistence", "vol_climatology", "vol_trailing_mean", "vol_ewma"],
 }
 
 

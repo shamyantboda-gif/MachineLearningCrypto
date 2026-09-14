@@ -1105,3 +1105,82 @@ def test_real_panel_targets_are_never_inside_the_feature_matrix(real_panel, base
     targets = build_targets(real_panel)
     overlap = set(matrix.X.columns) & set(targets.columns)
     assert not overlap, f"real panel: target columns inside X: {sorted(overlap)}"
+
+
+def _vol_baseline_forecasts(name: str, synthetic_panel, base_config):
+    """Fit one volatility baseline on the last synthetic fold; return it and the fold."""
+    matrix = _synthetic_matrix(synthetic_panel, base_config)
+    _, folds = _folds(matrix.X.index)
+    fold_data = _fold_data(matrix, folds[-1], "vol_1d")
+    model = build_baselines("vol_1d", task=REGRESSION)
+    model = next(m for m in model if m.name == name)
+    model.fit(fold_data)
+    return model, fold_data
+
+
+@pytest.mark.parametrize("name", ["vol_trailing_mean", "vol_ewma"])
+@pytest.mark.parametrize("cut", [0, 20])
+def test_level_space_volatility_baselines_are_causal(synthetic_panel, base_config, name, cut):
+    """The forecast on row t depends on realised variance up to t and nothing later.
+
+    Both baselines are seeded from the training tail and then run over the
+    test rows, the same shape as the GARCH recursion, so they get the same
+    perturbation test: multiply every realised variance after a boundary by
+    twenty and require every forecast on or before it to come back bit
+    identical, and at least one after it to move.
+    """
+    model, fold_data = _vol_baseline_forecasts(name, synthetic_panel, base_config)
+    meta_test = fold_data.meta_test
+    dates = _dates_of(meta_test.index).unique().sort_values()
+    assert len(dates) > cut + 5, "test window too short for this cut"
+    boundary = dates[cut]
+
+    before = np.asarray(model.predict(meta_test, meta_test), dtype=float)
+    assert np.ptp(before) > 0, "a constant forecast would make this test vacuous"
+
+    perturbed = meta_test.copy()
+    later = _dates_of(perturbed.index) > boundary
+    perturbed.loc[later, "realised_var_now"] = perturbed.loc[later, "realised_var_now"] * 20.0
+    after = np.asarray(model.predict(perturbed, perturbed), dtype=float)
+
+    unchanged = _dates_of(meta_test.index) <= boundary
+    assert np.array_equal(before[unchanged], after[unchanged]), (
+        f"{name}: a forecast dated on or before {boundary.date()} moved when "
+        "realised variance after that date was changed"
+    )
+    assert not np.array_equal(before[~unchanged], after[~unchanged]), (
+        f"{name}: the perturbation never reached the forecast, so the assertion "
+        "above is vacuous"
+    )
+
+
+def test_arithmetic_trailing_mean_is_never_below_the_geometric_one(synthetic_panel, base_config):
+    """Jensen: the level-space trailing mean sits at or above the log-space one.
+
+    ``vol_climatology`` averages logs, which is a geometric mean in levels and
+    therefore a systematic under-forecast under QLIKE. ``vol_trailing_mean``
+    averages the same window in levels. If the second were ever below the
+    first on a row where both are built from the same data, one of them is
+    not computing what its name says.
+    """
+    geo, fold_data = _vol_baseline_forecasts("vol_climatology", synthetic_panel, base_config)
+    arith, _ = _vol_baseline_forecasts("vol_trailing_mean", synthetic_panel, base_config)
+    meta_test = fold_data.meta_test
+    g = np.asarray(geo.predict(meta_test, meta_test), dtype=float)
+    a = np.asarray(arith.predict(meta_test, meta_test), dtype=float)
+    # The geometric baseline has no training tail, so its first rows per asset
+    # are short-window or fallback values; compare only where its full window
+    # is available.
+    full = np.zeros(len(meta_test), dtype=bool)
+    for asset in meta_test.index.get_level_values(schema.ASSET).unique():
+        rows = np.flatnonzero(meta_test.index.get_level_values(schema.ASSET) == asset)
+        full[rows[geo.window :]] = True
+    assert full.any()
+    assert np.all(a[full] >= g[full] - 1e-9), (
+        "the arithmetic trailing mean fell below the geometric one on "
+        f"{int((a[full] < g[full] - 1e-9).sum())} rows"
+    )
+    assert np.mean(a[full] - g[full]) > 0.05, (
+        "the two trailing means are nearly identical, so the Jensen gap this "
+        "test exists to document is not present on the synthetic panel"
+    )

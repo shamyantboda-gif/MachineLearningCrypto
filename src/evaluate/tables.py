@@ -103,9 +103,12 @@ def default_dm_baseline(target: str) -> str:
 
     Direction is compared against the abstaining forecast, because a constant
     0.5 is the thing a probabilistic model actually has to beat. Volatility is
-    compared against the trailing mean, which is the baseline that wins there.
+    compared against the RiskMetrics EWMA of realised variance, the strongest
+    of the simple causal forecasts under QLIKE. It used to be compared against
+    the trailing mean of log variance, which is a geometric mean in levels and
+    therefore biased low under an asymmetric loss; beating it proved nothing.
     """
-    return "vol_climatology" if target == "vol_1d" else "zero"
+    return "vol_ewma" if target == "vol_1d" else "zero"
 
 
 def dm_table(

@@ -4,7 +4,7 @@ Seven model families against four naive baselines on daily Binance bars for BTC,
 
 **Direction: nothing beat abstaining, on any asset, in either scope.** The best pooled model (ridge) called next-day direction 51.43% of the time against a 51.42% base rate. LightGBM's edge over its own base rate is +0.2pp on BTC, -0.2pp on ETH, +0.6pp on LTC, all inside a 3.6-point fold-to-fold spread. Fitting one model per asset did not help. For ridge and LightGBM the per-asset arm has lower accuracy than the pooled arm on all three assets; for the LSTM, CNN and DLinear it has higher accuracy, by 0.3 to 0.8 points, which is inside one seed's worth of noise, and no better Brier. Either way it trades a three-fold sample for parameters that had nothing asset-specific to learn, and neither scope beats abstaining on any asset.
 
-**Volatility: GARCH beats the trailing mean on every asset.** EGARCH(1,1) has lower QLIKE than a 63-day trailing mean on BTC, ETH and LTC, each at p < 0.002. An earlier version of this README said the opposite. Splitting the result by asset showed why: GARCH(1,1) had never produced a BTC forecast in any fold. Its Student-t fit is integrated on BTC, the stationarity guard rejected it, and the rejected asset fell back to a hard-coded constant that scored like a calibration failure. That bug and a mismatch between the test's loss and the headline metric are both fixed below.
+**Volatility: clustering is real, and GARCH is not the best way to capture it.** Every GARCH variant beats a 63-day trailing mean of *log* variance on every asset at p < 0.002, which is what an earlier version of this README reported as the study's one positive result. It is not one. That baseline is a geometric mean, biased low in the units QLIKE scores, and QLIKE punishes under-forecasting far harder than over-forecasting. The same window averaged in levels beats every GARCH variant, and a one-line RiskMetrics EWMA of the same realised measure (`0.94 sigma2[t-1] + 0.06 rv[t]`, no fitted parameters) beats them all on every asset at p < 0.01: QLIKE 0.651 against EGARCH's 0.772. The Diebold-Mariano test for volatility now runs against the EWMA. Two earlier volatility bugs and this baseline are all documented below.
 
 **Backtest: buy and hold wins.** Traded long-short as an equal-weight book, the LightGBM signal earned 10.0%/yr at zero cost and -19.3% at realistic taker fees; holding the three coins returned 34.5%. Per asset, the signal is positive after costs on LTC alone (+13.2% against 1.0% for holding LTC) and loses on BTC and ETH. One asset in three, on 27 folds, with no correction for the number of things compared, is the shape a chance result takes.
 
@@ -148,32 +148,42 @@ LightGBM gain, averaged over the five seeds within each fold and then ranked. Th
 
 ## Volatility: next-day log realised variance, 27 folds
 
-QLIKE is the headline metric, and the Diebold-Mariano test runs under QLIKE on variances against the trailing mean. Lower QLIKE is better.
+QLIKE is the headline metric, and the Diebold-Mariano test runs under QLIKE on variances. Lower QLIKE is better. The reference forecast is the RiskMetrics EWMA of the same Parkinson variance the target is built from, `sigma2[t] = 0.94 sigma2[t-1] + 0.06 rv[t]`, seeded from the training tail: one line, no fitted parameters, causal by construction. Fold means.
 
-| model | QLIKE | MZ slope | MZ R2 | RMSE (log variance) | DM p vs trailing mean |
+| model | QLIKE | MZ slope | MZ R2 | RMSE (log variance) | DM p vs EWMA |
 |---|---|---|---|---|---|
-| EGARCH(1,1) | 0.772 | 1.361 | 0.074 | 1.075 | <0.001 (better) |
-| GARCH(1,1), MZ-corrected | 0.790 | 0.569 | 0.040 | 1.326 | <0.001 (better) |
-| EGARCH(1,1), MZ-corrected | 0.791 | 1.028 | 0.075 | 1.058 | <0.001 (better) |
-| GARCH(1,1) | 0.792 | 0.789 | 0.037 | 1.337 | <0.001 (better) |
-| trailing mean, 63d | 1.015 | 0.914 | 0.034 | 1.096 | n/a |
-| persistence | 1.157 | 0.265 | 0.097 | 1.190 | 0.021 (worse) |
+| EWMA, lambda 0.94 | 0.651 | 0.593 | 0.055 | 1.192 | n/a |
+| trailing mean, 63d, arithmetic | 0.740 | 0.431 | 0.035 | 1.276 | <0.001 (worse) |
+| EGARCH(1,1) | 0.772 | 1.361 | 0.074 | 1.075 | <0.001 (worse) |
+| GARCH(1,1), MZ-corrected | 0.790 | 0.569 | 0.040 | 1.326 | <0.001 (worse) |
+| EGARCH(1,1), MZ-corrected | 0.791 | 1.028 | 0.075 | 1.058 | <0.001 (worse) |
+| GARCH(1,1) | 0.792 | 0.789 | 0.037 | 1.337 | <0.001 (worse) |
+| trailing mean, 63d, geometric (log-space) | 1.015 | 0.914 | 0.034 | 1.096 | <0.001 (worse) |
+| persistence | 1.157 | 0.265 | 0.097 | 1.190 | <0.001 (worse) |
 
-| model | asset | QLIKE | MZ slope | MZ R2 | DM p vs trailing mean |
+| model | asset | QLIKE | MZ slope | MZ R2 | DM p vs EWMA |
 |---|---|---|---|---|---|
-| EGARCH(1,1) | BTC | 0.833 | 1.299 | 0.037 | 0.001 (better) |
-| EGARCH(1,1) | ETH | 0.702 | 2.021 | 0.111 | <0.001 (better) |
-| EGARCH(1,1) | LTC | 0.817 | 2.859 | 0.078 | <0.001 (better) |
-| GARCH(1,1) | BTC | 0.877 | 4.047 | 0.025 | 0.013 (better) |
-| GARCH(1,1) | ETH | 0.705 | 1.187 | 0.083 | <0.001 (better) |
-| GARCH(1,1) | LTC | 0.800 | 2.231 | 0.054 | <0.001 (better) |
-| trailing mean, 63d | BTC | 1.115 | 0.944 | 0.024 | n/a |
-| trailing mean, 63d | ETH | 0.925 | 1.146 | 0.039 | n/a |
-| trailing mean, 63d | LTC | 1.056 | 1.396 | 0.027 | n/a |
+| EWMA, lambda 0.94 | BTC | 0.671 | 0.812 | 0.072 | n/a |
+| EWMA, lambda 0.94 | ETH | 0.614 | 0.808 | 0.078 | n/a |
+| EWMA, lambda 0.94 | LTC | 0.694 | 0.619 | 0.029 | n/a |
+| trailing mean, 63d, arithmetic | BTC | 0.741 | 0.791 | 0.032 | <0.001 (worse) |
+| trailing mean, 63d, arithmetic | ETH | 0.694 | 0.760 | 0.035 | <0.001 (worse) |
+| trailing mean, 63d, arithmetic | LTC | 0.814 | 0.530 | 0.011 | 0.002 (worse) |
+| EGARCH(1,1) | BTC | 0.833 | 1.299 | 0.037 | <0.001 (worse) |
+| EGARCH(1,1) | ETH | 0.702 | 2.021 | 0.111 | <0.001 (worse) |
+| EGARCH(1,1) | LTC | 0.817 | 2.859 | 0.078 | 0.003 (worse) |
+| GARCH(1,1) | BTC | 0.877 | 4.047 | 0.025 | <0.001 (worse) |
+| GARCH(1,1) | ETH | 0.705 | 1.187 | 0.083 | <0.001 (worse) |
+| GARCH(1,1) | LTC | 0.800 | 2.231 | 0.054 | 0.004 (worse) |
+| trailing mean, 63d, geometric | BTC | 1.115 | 0.944 | 0.024 | <0.001 (worse) |
+| trailing mean, 63d, geometric | ETH | 0.925 | 1.146 | 0.039 | <0.001 (worse) |
+| trailing mean, 63d, geometric | LTC | 1.056 | 1.396 | 0.027 | <0.001 (worse) |
 
-**The GARCH(1,1) BTC row is not a GARCH forecast.** With Student-t innovations the BTC fit comes out integrated (omega 0, alpha + beta 1.000) in all 27 folds, and the stationarity guard in `src/models/garch.py` rejects it. What is scored is the fallback: the training-window variance, a constant per fold. That constant still beats a 63-day trailing mean on QLIKE, because QLIKE punishes under-prediction far harder than over-prediction and a short trailing mean under-predicts before every spike. EGARCH, whose stability condition is on beta alone, fits BTC in 23 of 27 folds. Whether an integrated GARCH should be used for one-step forecasts anyway, as RiskMetrics does, is a decision this project has not taken; see "Not done".
+**What GARCH beat, and what it did not.** The geometric trailing mean, `exp(mean(log rv))`, sits below the arithmetic mean by the Jensen gap, a factor of 1.75 on this panel (median across rows; 1.66 on ETH, 1.82 on LTC), so in variance units it under-forecasts on an ordinary day. QLIKE charges `k - log k - 1` for a forecast too low by a factor k and `log k + 1/k - 1` for one too high by the same factor; at k = 1.75 the first is 0.19 and the second 0.13, and the asymmetry widens fast on the spike days that dominate the loss. Every GARCH variant's 0.24 margin over that baseline is that gap. Against the same 63 days averaged in levels, every GARCH variant loses. Against the EWMA, every GARCH variant loses on every asset at p < 0.01, and the arithmetic trailing mean loses too. What survives is the fact that tomorrow's variance is forecastable from today's, which the persistence row (1.157) against the EWMA row (0.651) shows more clearly than any GARCH fit: the information is in the last few days of realised range, and a fixed-weight smoother extracts it better than a Student-t GARCH re-estimated once per quarter and frozen for three months. The "GARCH(1,1) on BTC is a constant" and "fit on the first 80%" limitations below both cut against GARCH here, and neither is something the EWMA suffers from.
 
-**QLIKE and log squared error disagree, and that is not a contradiction.** GARCH has the lower QLIKE and the higher log RMSE on every asset. A forecast that is too high by a factor k costs log k + 1/k - 1 under QLIKE and (log k)^2 under squared log error; one that is too low by the same factor costs k - log k - 1 and the same (log k)^2. QLIKE cares which way you were wrong. The two MZ-corrected variants, calibrated on training folds only, land within 0.02 of the raw fits on QLIKE, so this is not an artifact a better calibration would remove.
+**The GARCH(1,1) BTC row is not a GARCH forecast, and a quarter of the ETH rows are not either.** With Student-t innovations the BTC fit comes out integrated (omega 0, alpha + beta 1.000) in all 27 folds, and the stationarity guard in `src/models/garch.py` rejects it; the same happens on ETH in 7 of 27 folds. What is scored on those cells is the fallback: the training-window variance, a constant per fold. That constant still beats the geometric trailing mean on QLIKE, for the reason above. EGARCH, whose stability condition is on beta alone, fits BTC in 23 of 27 folds and ETH in all 27. Whether an integrated GARCH should be used for one-step forecasts anyway, as RiskMetrics does, is a decision this project has not taken; see "Not done". (An integrated GARCH(1,1) with omega 0 *is* an EWMA, which is the model that wins this table.)
+
+**QLIKE and log squared error disagree, and that is not a contradiction.** The EWMA has the lowest QLIKE and one of the highest log RMSEs; EGARCH the reverse. A forecast that is too high by a factor k costs log k + 1/k - 1 under QLIKE and (log k)^2 under squared log error; one that is too low by the same factor costs k - log k - 1 and the same (log k)^2. QLIKE cares which way you were wrong, log RMSE does not, and the geometric mean is what minimises the second. The two MZ-corrected GARCH variants, calibrated on training folds only, land within 0.02 of the raw fits on QLIKE, so this is not an artifact a better calibration would remove.
 
 ## Backtest: long-short, 2% dead zone
 
@@ -241,12 +251,15 @@ Two things to know if you write your own fetcher: the Binance archive switched f
 
 **The test's loss is the headline's loss.** Direction is tested on Brier, which is what the accuracy table is read against. Volatility is tested on QLIKE, which is what the volatility table ranks on. When those two were allowed to differ the tables contradicted each other about the same forecasts, and the contradiction looked like a finding.
 
+**The baseline lives in the units of the loss.** A baseline that is unbiased in log space is biased in level space, and an asymmetric loss turns that bias into a margin for whatever it is compared against. The volatility baselines are now built in variance units, and the test that documents the gap between the two trailing means is in `tests/test_no_leakage.py`.
+
 **Both scopes, same rows.** A pooled fit and a per-asset fit are compared only on rows both predicted, and the number of those rows is printed next to the p-value.
 
 ## Bugs found while building this
 
 Most were caught by measurement rather than by reading code, which is the argument for building the evaluation harness first, and two of them were caught only when the measurement was split by asset, which is the argument for never reporting a pooled number alone.
 
+- **A volatility baseline that under-forecast by construction.** The "trailing mean" every GARCH variant beat at p < 0.002 averaged *log* variance and exponentiated: a geometric mean, below the arithmetic mean by the Jensen gap, so biased low in the units QLIKE scores, and QLIKE punishes under-forecasting far harder than over-forecasting. GARCH's 0.24 margin over it was that gap. Found by rebuilding simple causal forecasts from the panel on the same rows: the same 63-day window averaged in levels scored 0.740 against GARCH's 0.77 to 0.79, and a RiskMetrics EWMA 0.651. Both are baselines now (`vol_trailing_mean`, `vol_ewma`), the DM test runs against the EWMA, and `tests/test_no_leakage.py` checks that both are causal and that the arithmetic mean never sits below the geometric one. The "wrong loss" fix below was correct as far as it went; the contradiction it resolved was this baseline showing through.
 - **GARCH falling back to a hard-coded constant.** The training-variance fallback was recorded only for fits that passed the stationarity guard. A rejected fit, which is every BTC fold, fell to `log(1e-4)`, about a quarter of BTC's realised variance. Pooled, that read as QLIKE 7.9 and a story about calibration drift. Per asset, it read as BTC 8.9 against ETH 0.7, which is not a calibration problem. `tests/test_no_leakage.py` now forces the guard to reject and requires the fallback to equal the training variance.
 - **Diebold-Mariano under the wrong loss for volatility.** Squared error on log variance said GARCH was significantly worse than the trailing mean while QLIKE in the next column said it was better. Both were computed correctly; the test now runs under the metric the table ranks on.
 - **Per-asset tables that were never written.** `per_asset_results` and `per_asset_breakdown` were defined, documented, and called from nowhere. The four per-asset numbers in the earlier README were computed by hand and had no file behind them. Every run now writes `per_asset.csv` and `dm_per_asset.csv`, and the backtest writes `backtest_per_asset.csv`.
@@ -262,7 +275,8 @@ Most were caught by measurement rather than by reading code, which is the argume
 - **27 folds is not many.** Fold-to-fold SD of accuracy is ~3.6 points. The honest reading of the direction null is that no *large* edge exists, not that none does.
 - **Three assets.** Heavily correlated, chosen for long clean histories, i.e. because they survived. Any asset-to-asset comparison is on a cross-section of three.
 - **Per-asset tests are uncorrected.** Twelve per-asset direction tests, six per-asset volatility tests and eight scope comparisons are reported at face value and labelled exploratory. The pooled tests are the headline. For direction the omission is conservative because nothing survives; for volatility it is not needed because everything survives at p < 0.02, well inside any correction.
-- **GARCH(1,1) on BTC is a constant.** See above. The per-asset volatility rows for BTC compare EGARCH, which fitted, against a fallback, which did not.
+- **GARCH(1,1) is a constant on BTC in every fold and on ETH in 7 of 27.** See above. Those cells compare a training-window constant, not a GARCH recursion, against the baselines.
+- **Pooled Diebold-Mariano statistics overcount.** Pooling three assets treats 7,209 rows as independent, but BTC, ETH and LTC move on the same dates. Averaging each day's loss differences across assets and using Newey-West errors with 20 lags cuts the pooled EGARCH-versus-EWMA statistic from 6.1 to about 4.0, and the old EGARCH-versus-geometric-mean statistic from -7.2 to -3.4. Nothing changes sign or loses significance, but the pooled p-values are smaller than they should be by an unknown factor; the per-asset rows are the ones to read. The same applies to the pooled direction tests, where it is conservative because nothing is significant anyway.
 - **One horizon.** Everything is one day ahead.
 - **Every model is fitted on the first 80% of its window.** The most recent fifth of each training window is the early-stopping slice, and it is held out from every model, including ridge, ARIMA and GARCH, which have no use for it. Nothing leaks, but the state-carrying models start each test window from a fit that ended months earlier, and no model is refitted on train plus validation once its hyper-parameters are chosen.
 - **USDT, not USD.** Deepest books and longest history, but the peg has broken briefly on a handful of days.
@@ -277,7 +291,7 @@ Relaxing the GARCH stationarity guard to admit an integrated fit for one-step fo
 ```bash
 pip install -r requirements.txt
 make data      # 320 monthly files, checksum-verified, ~15 min first run, cached after
-make test      # 107 tests, mostly leakage, alignment and per-asset contracts; the 12 that read the real panel skip until make data has run
+make test      # 112 tests, mostly leakage, alignment and per-asset contracts; the 12 that read the real panel skip until make data has run
 make lint      # ruff, same rule set as CI
 make train     # baselines + ARIMA + ridge + LightGBM, pooled and per asset, on direction
 make vol       # baselines + GARCH/EGARCH on volatility
@@ -296,9 +310,9 @@ Every experiment is a YAML file, and the SHA256 of the merged config names its o
 |---|---|---|
 | direction, pooled and per asset; backtest | `6246329f52` | `results.csv`, `per_asset.csv`, `dm.csv`, `dm_per_asset.csv`, `backtest.csv`, `backtest_per_asset.csv`, `report.md` |
 | direction, sequence models | `2b7caa5555` | `results.csv`, `per_asset.csv`, `dm.csv`, `dm_per_asset.csv`, `report.md` |
-| volatility | `015429d904` | `results.csv`, `per_asset.csv`, `dm.csv`, `dm_per_asset.csv`, `report.md` |
+| volatility | `ab28c80127` | `results.csv`, `per_asset.csv`, `dm.csv`, `dm_per_asset.csv`, `report.md` |
 
-Every model in a table was evaluated on the same folds and rows as the baselines beside it. `--dm-baseline` changes the comparison without changing the config hash, so reporting a different baseline does not relocate the results.
+The volatility run replaced `015429d904` when the level-space baselines were added; every GARCH prediction in `ab28c80127` reproduces the earlier run's to the byte, and the hash moved only because the dead volatility-targeting config block had been removed. Every model in a table was evaluated on the same folds and rows as the baselines beside it. `--dm-baseline` changes the comparison without changing the config hash, so reporting a different baseline does not relocate the results.
 
 ```
 config/            base.yaml plus one file per model family, and a *_per_asset.yaml for each
@@ -321,4 +335,4 @@ reports/results/   one directory per run, named by config hash; runs.csv indexes
 
 ## References
 
-López de Prado, *Advances in Financial Machine Learning*, ch. 7 (purging and embargo). Zeng et al. (2022), "Are Transformers Effective for Time Series Forecasting?" (DLinear as the linear control). Diebold and Mariano (1995); Harvey, Leybourne and Newbold (1997) for the small-sample correction. Patton (2011), "Volatility forecast comparison using imperfect volatility proxies" (QLIKE).
+López de Prado, *Advances in Financial Machine Learning*, ch. 7 (purging and embargo). Zeng et al. (2022), "Are Transformers Effective for Time Series Forecasting?" (DLinear as the linear control). Diebold and Mariano (1995); Harvey, Leybourne and Newbold (1997) for the small-sample correction. Patton (2011), "Volatility forecast comparison using imperfect volatility proxies" (QLIKE). J.P. Morgan and Reuters (1996), *RiskMetrics Technical Document* (the lambda = 0.94 EWMA).

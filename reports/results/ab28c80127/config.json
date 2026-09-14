@@ -62,11 +62,6 @@
       "rule": "long_short",
       "band": 0.02,
       "threshold": 0.5,
-      "vol_target": {
-        "enabled": false,
-        "annual_target": 0.4,
-        "max_leverage": 1.0
-      },
       "cost_bps_round_trip": [
         0.0,
         5.0,
